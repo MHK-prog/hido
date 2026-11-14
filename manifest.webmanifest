@@ -1,0 +1,29 @@
+{
+  "id": "./",
+  "name": "hido",
+  "short_name": "hido",
+  "description": "ساخت و مدیریت برنامه‌های تمرینی",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f5ef",
+  "theme_color": "#17261e",
+  "categories": ["health", "fitness"],
+  "icons": [
+    {
+      "src": "./assets/icons/hido-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/hido-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
