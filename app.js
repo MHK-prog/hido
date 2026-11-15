@@ -29,6 +29,9 @@ let activeDefinitionId = readDefinitionId();
 let activeMuscleRole = "primary";
 let svgTemplatePromise = null;
 let toastTimer = null;
+let composer = null;
+let composerReturnAction = null;
+let composerPreviousMuscleRole = "primary";
 
 function createId() {
   return "hido-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -75,6 +78,7 @@ function cleanWeight(value) {
 
 function sanitizeDefinition(raw) {
   const type = raw.type === "superset" ? "superset" : "single";
+  const legacyMovementRest = boundedInt(raw.restBetweenMovementsSeconds, 0, 0, 3600);
   const primary = Array.isArray(raw.primary)
     ? raw.primary.filter(function (group, index, list) {
         return typeof group === "string" && MUSCLE_GROUPS.includes(group) && list.indexOf(group) === index;
@@ -100,12 +104,16 @@ function sanitizeDefinition(raw) {
             type: movement.type === "time" ? "time" : "reps",
             reps: boundedInt(movement.reps, 10, 1, 1000),
             durationSeconds: boundedInt(movement.durationSeconds, 30, 1, 10800),
-            weightKg: cleanWeight(movement.weightKg)
+            weightKg: cleanWeight(movement.weightKg),
+            restAfterSeconds: boundedInt(movement.restAfterSeconds, legacyMovementRest, 0, 3600)
           };
         })
       : [],
     rounds: boundedInt(raw.rounds, 3, 1, 50),
-    restBetweenMovementsSeconds: boundedInt(raw.restBetweenMovementsSeconds, 0, 0, 3600),
+    restMode: ["none", "equal", "individual"].includes(raw.restMode)
+      ? raw.restMode
+      : legacyMovementRest > 0 ? "equal" : "none",
+    restBetweenMovementsSeconds: legacyMovementRest,
     restBetweenRoundsSeconds: boundedInt(raw.restBetweenRoundsSeconds, 90, 0, 3600)
   };
 }
@@ -120,6 +128,11 @@ function sanitizeDefinitions(rawDefinitions) {
     definition.movements = definition.movements.filter(function (movement) {
       return singleIds.has(movement.exerciseId);
     });
+    const firstNames = definition.movements.slice(0, 2).map(function (movement) {
+      const child = definitions.find(function (candidate) { return candidate.id === movement.exerciseId; });
+      return child ? child.name : "";
+    }).filter(Boolean);
+    definition.name = firstNames.length ? firstNames.join(" + ") : "سوپرست ناتمام";
   });
   return definitions;
 }
@@ -214,7 +227,7 @@ function migrateProgramSupersets(definitions, program) {
     const firstItem = group[0];
     const composite = {
       id: createId(),
-      name: ("سوپرست: " + sourceDefinitions.map(function (definition) { return definition.name; }).join(" + ")).slice(0, 80),
+      name: sourceDefinitions.slice(0, 2).map(function (definition) { return definition.name; }).join(" + ").slice(0, 80),
       type: "superset",
       primary: [],
       secondary: [],
@@ -225,10 +238,12 @@ function migrateProgramSupersets(definitions, program) {
           type: item.type,
           reps: item.reps,
           durationSeconds: item.durationSeconds,
-          weightKg: item.weightKg
+          weightKg: item.weightKg,
+          restAfterSeconds: firstItem.restBetweenMovementsSeconds
         };
       }),
       rounds: firstItem.sets,
+      restMode: firstItem.restBetweenMovementsSeconds > 0 ? "equal" : "none",
       restBetweenMovementsSeconds: firstItem.restBetweenMovementsSeconds,
       restBetweenRoundsSeconds: firstItem.restBetweenSetsSeconds
     };
@@ -347,6 +362,31 @@ function getDefinition(id) {
   return state.definitions.find(function (definition) { return definition.id === id; });
 }
 
+function getEditableDefinition(id) {
+  if (composer && composer.definition && composer.definition.id === id) return composer.definition;
+  return getDefinition(id);
+}
+
+function autoSupersetName(definition) {
+  if (!definition || definition.type !== "superset") return "";
+  return definition.movements.slice(0, 2).map(function (movement) {
+    const child = getDefinition(movement.exerciseId) ||
+      (composer && composer.definition && composer.definition.id === movement.exerciseId ? composer.definition : null);
+    return child ? child.name : "";
+  }).filter(Boolean).join(" + ");
+}
+
+function supersetRestSummary(definition) {
+  if (definition.restMode === "none") return "بدون استراحت بین حرکت‌ها";
+  if (definition.restMode === "equal") {
+    return "استراحت برابر بین حرکت‌ها: " + number(definition.restBetweenMovementsSeconds) + " ثانیه";
+  }
+  return "استراحت مجزا: " + definition.movements.slice(0, -1).map(function (movement) {
+    const child = getDefinition(movement.exerciseId);
+    return (child ? child.name : "حرکت") + " · " + number(movement.restAfterSeconds) + " ثانیه";
+  }).join("، ");
+}
+
 function getProgramItem(id) {
   return state.program.items.find(function (item) { return item.id === id; });
 }
@@ -419,7 +459,7 @@ function renderProgramItem(item) {
     return '<article class="program-movement compound-program-movement"><div class="program-movement-heading"><span class="pair-marker">مینی‌برنامه</span>' +
       '<strong>' + escapeHtml(definition.name) + '</strong><a href="./exercises.html#definition/' + encodeURIComponent(definition.id) + '">ویرایش سوپرست</a>' +
       '<button class="small-action remove-action" type="button" data-action="remove-program-item" data-id="' + escapeHtml(item.id) + '">حذف از برنامه</button></div>' +
-      '<div class="compound-summary"><strong>' + number(definition.rounds) + ' ست سوپرست</strong><span>استراحت بین حرکت‌ها: ' + number(definition.restBetweenMovementsSeconds) + ' ثانیه</span>' +
+      '<div class="compound-summary"><strong>' + number(definition.rounds) + ' ست سوپرست</strong><span>' + escapeHtml(supersetRestSummary(definition)) + '</span>' +
       '<span>استراحت بین ست‌های سوپرست: ' + number(definition.restBetweenRoundsSeconds) + ' ثانیه</span></div>' +
       (definition.movements.length >= 2 && preview ? '<ol class="compound-preview">' + preview + '</ol>' : '<p class="field-help">برای استفاده در برنامه، دست‌کم دو حرکت تکی به این سوپرست اضافه کن.</p>') + '</article>';
   }
@@ -478,8 +518,7 @@ function renderExportProgramItem(item, index) {
       return '<li><strong>' + number(movementIndex + 1) + ". " + escapeHtml(child.name) +
         '</strong><span>' + amount + weight + '</span></li>';
     }).join("");
-    details = '<p class="summary">' + number(definition.rounds) + " دور کامل · استراحت بین حرکت‌ها: " +
-      number(definition.restBetweenMovementsSeconds) + " ثانیه · استراحت بین دورها: " +
+    details = '<p class="summary">' + number(definition.rounds) + " دور کامل · " + escapeHtml(supersetRestSummary(definition)) + " · استراحت بین دورها: " +
       number(definition.restBetweenRoundsSeconds) + ' ثانیه</p><ol>' + movements + "</ol>";
   } else {
     const amount = item.type === "reps"
@@ -574,15 +613,15 @@ function renderProgramPage() {
     return '<option value="' + escapeHtml(definition.id) + '">[' + typeLabel + '] ' + escapeHtml(definition.name) + '</option>';
   }).join("");
   return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p>' +
-    '<h1>نوشتن برنامه</h1><p class="page-intro">حرکت تکی یا سوپرست آماده را به برنامه اضافه کن و ترتیب بلوک‌ها را بچین. جزئیات هر سوپرست از صفحهٔ تعریف حرکت ویرایش می‌شود.</p>' +
+    '<h1>نوشتن برنامه</h1><p class="page-intro">حرکت تکی یا سوپرست را به برنامه اضافه کن و ترتیب بلوک‌ها را بچین.</p>' +
     '<div class="heading-actions"><button class="export-button" type="button" data-action="export-program">دریافت خروجی آفلاین</button></div></header>' +
     '<section class="plan-settings"><div class="section-heading"><div><p class="eyebrow">تنظیم برنامه</p><h2>نام و استراحت برنامه</h2></div></div>' +
     '<label class="field-label">نام برنامه<input class="text-input" data-program-field="name" maxlength="80" value="' + escapeHtml(program.name) + '"></label>' +
     '<label class="field-label">استراحت بین حرکت‌های برنامه <span>(ثانیه)</span><input class="number-input" data-program-field="restBetweenExercisesSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(program.restBetweenExercisesSeconds) + '"></label>' +
     '<p class="field-help">این استراحت بعد از حرکت تکی یا بعد از پایان یک بلوک سوپرست اعمال می‌شود.</p></section>' +
     (programDefinitions.length
-      ? '<form class="add-movement-form" data-form="add-program-item"><select class="select-input" name="definition-id" required><option value="">انتخاب حرکت تعریف‌شده</option>' + options +
-        '</select><button class="primary-button" type="submit">افزودن به برنامه</button></form>'
+      ? '<div class="program-add-actions"><form class="add-movement-form" data-form="add-program-item"><select class="select-input" name="definition-id" required><option value="">انتخاب حرکت تعریف‌شده</option>' + options +
+        '</select><button class="primary-button" type="submit">افزودن حرکت</button></form><button class="secondary-button" type="button" data-action="open-program-superset">افزودن سوپرست</button></div>'
       : '<div class="empty-state"><strong>' + (state.definitions.length ? "سوپرست کامل نشده" : "اول حرکت‌ها را تعریف کن") + '</strong><p>' +
         (state.definitions.length ? "برای افزودن سوپرست به برنامه، دست‌کم دو حرکت تکی داخل تعریف ترکیبی قرار بده." : "حرکت تکی یا سوپرست ترکیبی را در صفحهٔ تعریف حرکت بساز.") +
         '</p><a class="text-link" href="./exercises.html">رفتن به تعریف حرکت‌ها ←</a></div>') +
@@ -605,35 +644,66 @@ function renderDefinitionList() {
   const editor = selected ? renderDefinitionEditor(selected) : "";
   return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido · کتابخانهٔ حرکت‌ها</p>' +
     '<h1>تعریف حرکت</h1><p class="page-intro">حرکت تکی تعریف کن یا چند حرکت تکی را در یک سوپرست ترکیبی بچین.</p></header>' +
-    '<form class="new-exercise-form" data-form="new-definition"><input class="text-input" name="definition-name" type="text" maxlength="80" autocomplete="off" placeholder="نام حرکت یا سوپرست" aria-label="نام حرکت" required>' +
-    '<select class="select-input definition-kind-select" name="definition-type" aria-label="نوع حرکت"><option value="single">تکی</option><option value="superset">ترکیبی (سوپرست)</option></select>' +
-    '<button class="primary-button" type="submit">ساخت</button></form>' +
+    '<div class="definition-action-pair"><button class="primary-button" type="button" data-action="open-single-composer">افزودن حرکت</button>' +
+    '<button class="secondary-button" type="button" data-action="open-superset-composer">افزودن سوپرست</button></div>' +
     (selected ? editor : (state.definitions.length
       ? '<div class="exercise-list">' + rows + '</div>'
-      : '<div class="empty-state"><strong>هنوز حرکتی تعریف نشده</strong><p>نام اولین حرکت را بالا بنویس و بعد ناحیه‌های درگیرش را روی نقشه انتخاب کن.</p></div>')) +
+      : '<div class="empty-state"><strong>هنوز حرکتی تعریف نشده</strong><p>برای شروع، یکی از دکمه‌های افزودن حرکت یا افزودن سوپرست را بزن.</p></div>')) +
     '</section>';
+}
+
+function renderComposerModal() {
+  if (!composer) return "";
+  if (composer.type === "single") {
+    const definition = composer.definition;
+    return '<div class="modal-backdrop" data-modal-backdrop><section class="composer-modal single-composer-modal" role="dialog" aria-modal="true" aria-labelledby="composer-title">' +
+      '<div class="modal-heading"><div><p class="eyebrow">حرکت تکی</p><h2 id="composer-title">ساخت حرکت</h2></div>' +
+      '<button class="small-action icon-action" type="button" data-action="close-composer" aria-label="بستن">×</button></div>' +
+      '<form class="single-composer-form" data-form="save-single-composer"><label class="field-label modal-name-field">نام حرکت<input class="text-input" data-single-draft-name maxlength="80" autocomplete="off" placeholder="مثلاً پرس سینه" required></label>' +
+      '<div class="muscle-editor">' + renderMuscleEditor(definition) + '</div>' +
+      '<div class="modal-actions"><button class="small-action" type="button" data-action="close-composer">انصراف</button>' +
+      '<button class="primary-button" type="submit">ساخت حرکت</button></div></form></section></div>';
+  }
+  if (composer.type === "superset") {
+    const definition = composer.definition;
+    const generatedName = autoSupersetName(definition) || "نام سوپرست بر اساس حرکت‌های اول و دوم ساخته می‌شود";
+    return '<div class="modal-backdrop" data-modal-backdrop><section class="composer-modal superset-composer-modal" role="dialog" aria-modal="true" aria-labelledby="composer-title">' +
+      '<div class="modal-heading"><div><p class="eyebrow">ترکیبی · سوپرست</p><h2 id="composer-title">ساخت سوپرست</h2></div>' +
+      '<button class="small-action icon-action" type="button" data-action="close-composer" aria-label="بستن">×</button></div>' +
+      '<p class="auto-superset-name" data-auto-superset-name>' + escapeHtml(generatedName) + '</p>' +
+      renderSupersetDefinitionEditor(definition, true) +
+      '<div class="modal-actions"><button class="small-action" type="button" data-action="close-composer">انصراف</button>' +
+      '<button class="primary-button" type="button" data-action="save-superset-composer" ' + (definition.movements.length < 2 ? "disabled" : "") + '>' +
+      (composer.addToProgram ? "افزودن سوپرست به برنامه" : "ساخت سوپرست") + '</button></div></section></div>';
+  }
+  return "";
 }
 
 function renderDefinitionEditor(definition) {
   const typeLabel = definition.type === "superset" ? "ترکیبی · سوپرست" : "حرکت تکی";
   const editorBody = definition.type === "superset"
-    ? renderSupersetDefinitionEditor(definition)
-    : '<div class="map-instructions"><span class="instruction-icon">●</span><span>نقش ماهیچه را از نوار پایین انتخاب کن؛ بعد از روی شکل یا فهرست فارسی ماهیچه‌ها را بزن.</span></div>' +
-      '<div class="body-map" id="body-map"><img class="body-map-fallback" src="./full_body.svg" alt="نقشهٔ ماهیچه‌های بدن"></div>' +
-      '<p class="map-note" id="map-note" role="status">ماهیچه‌های انتخاب‌شده با رنگ نقششان مشخص می‌شوند.</p>' +
-      '<div class="map-legend"><span><i class="legend-dot primary-dot"></i>اصلی</span><span><i class="legend-dot secondary-dot"></i>فرعی</span></div>' +
-      renderMusclePicker(definition) +
-      '<div class="selection-toast" id="selection-toast" role="status" aria-live="polite"></div>' +
-      '<div class="role-dock" role="group" aria-label="انتخاب نقش ماهیچه">' +
-      '<button class="role-button active" type="button" data-action="select-muscle-role" data-role="primary" aria-pressed="true"><span>ماهیچهٔ اصلی</span><small><b id="primary-count">' + number(definition.primary.length) + '</b> انتخاب</small></button>' +
-      '<button class="role-button" type="button" data-action="select-muscle-role" data-role="secondary" aria-pressed="false"><span>ماهیچهٔ فرعی</span><small><b id="secondary-count">' + number(definition.secondary.length) + '</b> انتخاب</small></button>' +
-      '</div>';
+    ? renderSupersetDefinitionEditor(definition, false)
+    : '<div class="muscle-editor">' + renderMuscleEditor(definition) + '</div>';
   return '<section class="definition-editor ' + (definition.type === "superset" ? "superset-definition-editor" : "") + '"><div class="detail-top"><button class="back-button" type="button" data-action="back-to-library" aria-label="بازگشت به فهرست">←</button>' +
     '<div class="detail-title"><p class="eyebrow">ویرایش تعریف حرکت</p><h2>' + escapeHtml(definition.name) + '</h2></div>' +
     '<button class="danger-button" type="button" data-action="delete-definition" data-id="' + escapeHtml(definition.id) + '">حذف</button></div>' +
     '<p class="definition-kind-badge">' + typeLabel + '</p>' +
-    '<label class="field-label">نام حرکت<input class="text-input" data-definition-field="name" maxlength="80" value="' + escapeHtml(definition.name) + '"></label>' +
+    (definition.type === "single" ? '<label class="field-label">نام حرکت<input class="text-input" data-definition-field="name" maxlength="80" value="' + escapeHtml(definition.name) + '"></label>' :
+      '<p class="auto-superset-name">نام خودکار: ' + escapeHtml(autoSupersetName(definition) || definition.name) + '</p>') +
     editorBody + '</section>';
+}
+
+function renderMuscleEditor(definition) {
+  return '<div class="map-instructions"><span class="instruction-icon">●</span><span>نقش ماهیچه را انتخاب کن و بعد از روی شکل یا فهرست فارسی ماهیچه‌ها را بزن.</span></div>' +
+    '<div class="body-map" data-body-map-for="' + escapeHtml(definition.id) + '"><img class="body-map-fallback" src="./full_body.svg" alt="نقشهٔ ماهیچه‌های بدن"></div>' +
+    '<p class="map-note" role="status">ماهیچه‌های اصلی قرمز و ماهیچه‌های فرعی زرد دیده می‌شوند.</p>' +
+    '<div class="map-legend"><span><i class="legend-dot primary-dot"></i>اصلی</span><span><i class="legend-dot secondary-dot"></i>فرعی</span></div>' +
+    renderMusclePicker(definition) +
+    '<div class="selection-toast" role="status" aria-live="polite"></div>' +
+    '<div class="role-dock" data-muscle-role-dock="' + escapeHtml(definition.id) + '" role="group" aria-label="انتخاب نقش ماهیچه">' +
+    '<button class="role-button active" type="button" data-action="select-muscle-role" data-definition-id="' + escapeHtml(definition.id) + '" data-role="primary" aria-pressed="true"><span>ماهیچهٔ اصلی</span><small><b data-primary-count="' + escapeHtml(definition.id) + '">' + number(definition.primary.length) + '</b> انتخاب</small></button>' +
+    '<button class="role-button" type="button" data-action="select-muscle-role" data-definition-id="' + escapeHtml(definition.id) + '" data-role="secondary" aria-pressed="false"><span>ماهیچهٔ فرعی</span><small><b data-secondary-count="' + escapeHtml(definition.id) + '">' + number(definition.secondary.length) + '</b> انتخاب</small></button>' +
+    '</div>';
 }
 
 function renderMusclePicker(definition) {
@@ -643,16 +713,16 @@ function renderMusclePicker(definition) {
     const stateLabel = role === "primary" ? "اصلی" : role === "secondary" ? "فرعی" : "انتخاب";
     return '<button class="muscle-option ' + (role ? "is-" + role : "") +
       '" type="button" data-action="toggle-muscle" data-muscle="' + escapeHtml(group) +
-      '" data-muscle-option aria-pressed="' + String(role === activeMuscleRole) + '">' +
+      '" data-definition-id="' + escapeHtml(definition.id) + '" data-muscle-option aria-pressed="' + String(role === activeMuscleRole) + '">' +
       '<span>' + escapeHtml(MUSCLE_NAMES[group]) + '</span><small class="muscle-option-state">' +
       stateLabel + "</small></button>";
   }).join("");
-  return '<section class="muscle-picker" aria-label="انتخاب ماهیچه از فهرست"><h3>انتخاب از فهرست فارسی</h3>' +
+  return '<section class="muscle-picker" data-muscle-picker-for="' + escapeHtml(definition.id) + '" aria-label="انتخاب ماهیچه از فهرست"><h3>انتخاب از فهرست فارسی</h3>' +
     '<p class="field-help">هر بار زدن، ماهیچه را به نقش انتخاب‌شده اضافه یا از همان نقش حذف می‌کند.</p>' +
     '<div class="muscle-picker-list">' + buttons + "</div></section>";
 }
 
-function renderSupersetDefinitionEditor(definition) {
+function renderSupersetDefinitionEditor(definition, inModal) {
   const options = state.definitions.filter(function (candidate) {
     return candidate.type === "single";
   }).map(function (candidate) {
@@ -662,67 +732,68 @@ function renderSupersetDefinitionEditor(definition) {
     const child = getDefinition(movement.exerciseId);
     if (!child) return "";
     const amount = movement.type === "reps"
-      ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="reps" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.reps) + '"></label>'
-      : '<label class="field-label">زمان اجرای این حرکت <span>(ثانیه)</span><input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="durationSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.durationSeconds) + '"></label>';
+      ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="reps" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.reps) + '"></label>'
+      : '<label class="field-label">زمان اجرای این حرکت <span>(ثانیه)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="durationSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.durationSeconds) + '"></label>';
     return '<article class="superset-definition-movement"><div class="superset-definition-movement-heading"><span class="pair-marker">حرکت ' + number(index + 1) + '</span>' +
       '<strong>' + escapeHtml(child.name) + '</strong><div class="member-actions">' +
-      '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-id="' + escapeHtml(movement.id) + '" data-direction="up" aria-label="جابجایی حرکت به بالا" ' + (index === 0 ? "disabled" : "") + '>↑</button>' +
-      '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-id="' + escapeHtml(movement.id) + '" data-direction="down" aria-label="جابجایی حرکت به پایین" ' + (index === definition.movements.length - 1 ? "disabled" : "") + '>↓</button></div>' +
-      '<button class="small-action remove-action" type="button" data-action="remove-superset-definition-movement" data-id="' + escapeHtml(movement.id) + '">حذف</button></div>' +
-      '<div class="prescription-grid"><label class="field-label">نوع اجرا<select class="select-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="type">' +
+      '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '" data-id="' + escapeHtml(movement.id) + '" data-direction="up" aria-label="جابجایی حرکت به بالا" ' + (index === 0 ? "disabled" : "") + '>↑</button>' +
+      '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '" data-id="' + escapeHtml(movement.id) + '" data-direction="down" aria-label="جابجایی حرکت به پایین" ' + (index === definition.movements.length - 1 ? "disabled" : "") + '>↓</button></div>' +
+      '<button class="small-action remove-action" type="button" data-action="remove-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '" data-id="' + escapeHtml(movement.id) + '">حذف</button></div>' +
+      '<div class="prescription-grid"><label class="field-label">نوع اجرا<select class="select-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="type">' +
       '<option value="reps" ' + (movement.type === "reps" ? "selected" : "") + '>تکراری</option><option value="time" ' + (movement.type === "time" ? "selected" : "") + '>تایمی</option></select></label>' + amount +
-      '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="weightKg" type="text" inputmode="decimal" autocomplete="off" placeholder="وزن بدن" value="' + numberInput(movement.weightKg) + '"></label></div></article>';
+      '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="weightKg" type="text" inputmode="decimal" autocomplete="off" placeholder="وزن بدن" value="' + numberInput(movement.weightKg) + '"></label></div></article>' +
+      (index < definition.movements.length - 1 && definition.restMode === "equal"
+        ? '<div class="superset-rest-gap"><span>استراحت بین این دو حرکت</span><strong>' + number(definition.restBetweenMovementsSeconds) + ' ثانیه</strong></div>'
+        : index < definition.movements.length - 1 && definition.restMode === "individual"
+          ? '<label class="superset-rest-gap"><span>استراحت بعد از ' + escapeHtml(child.name) + ' <small>(ثانیه)</small></span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="restAfterSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.restAfterSeconds) + '"></label>'
+          : "");
   }).join("");
-  return '<section class="superset-definition-builder"><div class="map-instructions"><span class="instruction-icon">●</span><span>این سوپرست یک مینی‌برنامه است: حرکت‌های تکی را به ترتیب اضافه کن و نسخهٔ اجرای هر کدام را جدا تنظیم کن.</span></div>' +
-    '<div class="superset-definition-settings"><label class="field-label">تعداد ست سوپرست <span>(هر ست یک دور کامل)</span><input class="number-input" data-superset-field="rounds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.rounds) + '"></label>' +
-    '<label class="field-label">استراحت بین حرکت‌های هر دور <span>(ثانیه)</span><input class="number-input" data-superset-field="restBetweenMovementsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.restBetweenMovementsSeconds) + '"></label>' +
-    '<label class="field-label">استراحت بین ست‌های سوپرست <span>(ثانیه)</span><input class="number-input" data-superset-field="restBetweenRoundsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.restBetweenRoundsSeconds) + '"></label></div>' +
+  const modeButtons = [["none", "بدون استراحت"], ["equal", "استراحت برابر"], ["individual", "استراحت مجزا"]].map(function (choice) {
+    return '<button class="rest-mode-option ' + (definition.restMode === choice[0] ? "active" : "") + '" type="button" data-action="set-superset-rest-mode" data-superset-id="' + escapeHtml(definition.id) + '" data-mode="' + choice[0] + '" aria-pressed="' + String(definition.restMode === choice[0]) + '">' + choice[1] + '</button>';
+  }).join("");
+  return '<section class="superset-definition-builder ' + (inModal ? "is-modal-builder" : "") + '">' +
+    '<div class="map-instructions"><span class="instruction-icon">●</span><span>حرکت‌های تکی را به ترتیب اضافه کن و اجرای هر کدام را جدا تنظیم کن. نام سوپرست از دو حرکت اول ساخته می‌شود.</span></div>' +
     (state.definitions.some(function (candidate) { return candidate.type === "single"; })
-      ? '<form class="add-superset-movement-form" data-form="add-superset-definition-movement"><select class="select-input" name="exercise-id" aria-label="انتخاب حرکت تکی برای سوپرست" required><option value="">انتخاب حرکت تکی</option>' + options + '</select><button class="primary-button" type="submit">افزودن به سوپرست</button></form>'
-      : '<div class="empty-state compact-empty"><strong>حرکت تکی‌ای برای افزودن نیست</strong><p>اول یک حرکت تکی تعریف کن، بعد آن را به سوپرست اضافه کن.</p><button class="small-action" type="button" data-action="back-to-library">بازگشت به فهرست حرکت‌ها</button></div>') +
-    (definition.movements.length < 2 ? '<p class="field-help">برای استفاده در برنامه، این سوپرست باید دست‌کم دو حرکت داشته باشد.</p>' : "") +
+      ? '<form class="add-superset-movement-form" data-form="add-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '"><select class="select-input" name="exercise-id" aria-label="انتخاب حرکت تکی برای سوپرست" required><option value="">انتخاب حرکت تکی</option>' + options + '</select><button class="primary-button" type="submit">افزودن حرکت</button></form>'
+      : '<div class="empty-state compact-empty"><strong>حرکت تکی‌ای برای افزودن نیست</strong><p>اول یک حرکت تکی تعریف کن، بعد آن را به سوپرست اضافه کن.</p>' +
+        (inModal ? '<button class="small-action" type="button" data-action="close-composer">بستن مودال</button>' : '<button class="small-action" type="button" data-action="back-to-library">بازگشت به فهرست حرکت‌ها</button>') + '</div>') +
+    '<div class="superset-definition-settings"><label class="field-label">تعداد ست سوپرست <span>(هر ست یک دور کامل)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-field="rounds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.rounds) + '"></label>' +
+    '<label class="field-label">استراحت بین ست‌های سوپرست <span>(ثانیه)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-field="restBetweenRoundsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.restBetweenRoundsSeconds) + '"></label></div>' +
+    '<div class="rest-mode-control" role="group" aria-label="نوع استراحت بین حرکت‌های سوپرست"><span>استراحت بین حرکت‌ها</span><div class="rest-mode-options">' + modeButtons + '</div></div>' +
+    (definition.restMode === "equal" ? '<label class="field-label equal-rest-field">استراحت برابر بین حرکت‌ها <span>(ثانیه)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-field="restBetweenMovementsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.restBetweenMovementsSeconds) + '"></label>' : "") +
+    (definition.movements.length < 2 ? '<p class="field-help">برای ساخت سوپرست، دست‌کم دو حرکت به فهرست اضافه کن.</p>' : "") +
     (definition.movements.length ? '<div class="superset-definition-list">' + movements + '</div>' :
       '<div class="empty-state compact-empty"><strong>سوپرست هنوز حرکت ندارد</strong><p>از فهرست بالا حرکت‌های تکی را به این مینی‌برنامه اضافه کن.</p></div>') + '</section>';
 }
 
 function render() {
-  appRoot.innerHTML = pageKind === "exercises" ? renderDefinitionList() : renderProgramPage();
+  document.body.classList.toggle("modal-open", Boolean(composer));
+  appRoot.innerHTML = (pageKind === "exercises" ? renderDefinitionList() : renderProgramPage()) + renderComposerModal();
   document.title = pageKind === "exercises" ? "تعریف حرکت | hido" : state.program.name + " | hido";
   if (pageKind === "exercises" && activeDefinitionId && getDefinition(activeDefinitionId) &&
       getDefinition(activeDefinitionId).type === "single") {
     attachBodyMap(activeDefinitionId);
   }
+  if (composer && composer.type === "single") attachBodyMap(composer.definition.id);
 }
 
-function addDefinition(form) {
-  const name = form.elements.namedItem("definition-name").value.trim();
-  if (!name) return;
-  const type = form.elements.namedItem("definition-type").value === "superset" ? "superset" : "single";
-  const definition = type === "superset"
-    ? { id: createId(), name: name, type: type, primary: [], secondary: [], movements: [], rounds: 3, restBetweenMovementsSeconds: 0, restBetweenRoundsSeconds: 90 }
-    : { id: createId(), name: name, type: type, primary: [], secondary: [] };
-  state.definitions.push(definition);
-  if (!saveData()) {
-    state.definitions.pop();
-    return;
-  }
-  activeDefinitionId = definition.id;
-  window.history.pushState({}, "", "#definition/" + encodeURIComponent(definition.id));
+function persistEditedDefinition(definition) {
+  if (getDefinition(definition.id)) saveData();
   render();
 }
 
 function addSupersetDefinitionMovement(form) {
-  const definition = getDefinition(activeDefinitionId);
+  const definition = getEditableDefinition(form.dataset.supersetId);
   const exerciseId = form.elements.namedItem("exercise-id").value;
   const child = getDefinition(exerciseId);
   if (!definition || definition.type !== "superset" || !child || child.type !== "single") return;
-  definition.movements.push({ id: createId(), exerciseId: child.id, type: "reps", reps: 10, durationSeconds: 30, weightKg: "" });
-  saveData();
-  render();
+  definition.movements.push({ id: createId(), exerciseId: child.id, type: "reps", reps: 10, durationSeconds: 30, weightKg: "", restAfterSeconds: definition.restBetweenMovementsSeconds });
+  definition.name = autoSupersetName(definition) || definition.name;
+  persistEditedDefinition(definition);
 }
 
-function moveSupersetDefinitionMovement(movementId, direction) {
-  const definition = getDefinition(activeDefinitionId);
+function moveSupersetDefinitionMovement(movementId, direction, definitionId) {
+  const definition = getEditableDefinition(definitionId || activeDefinitionId);
   if (!definition || definition.type !== "superset") return;
   const index = definition.movements.findIndex(function (movement) { return movement.id === movementId; });
   const target = direction === "up" ? index - 1 : index + 1;
@@ -730,31 +801,33 @@ function moveSupersetDefinitionMovement(movementId, direction) {
   const movement = definition.movements[index];
   definition.movements[index] = definition.movements[target];
   definition.movements[target] = movement;
-  saveData();
-  render();
+  definition.name = autoSupersetName(definition) || definition.name;
+  persistEditedDefinition(definition);
 }
 
-function removeSupersetDefinitionMovement(movementId) {
-  const definition = getDefinition(activeDefinitionId);
+function removeSupersetDefinitionMovement(movementId, definitionId) {
+  const definition = getEditableDefinition(definitionId || activeDefinitionId);
   if (!definition || definition.type !== "superset") return;
   definition.movements = definition.movements.filter(function (movement) { return movement.id !== movementId; });
-  saveData();
-  render();
+  definition.name = autoSupersetName(definition) || "سوپرست ناتمام";
+  persistEditedDefinition(definition);
 }
 
 function updateSupersetDefinitionField(input) {
-  const definition = getDefinition(activeDefinitionId);
+  const definition = getEditableDefinition(input.dataset.supersetId || activeDefinitionId);
   if (!definition || definition.type !== "superset") return;
   const field = input.dataset.supersetField;
   if (field === "rounds") definition.rounds = boundedInt(input.value, definition.rounds, 1, 50);
-  if (field === "restBetweenMovementsSeconds") definition.restBetweenMovementsSeconds = boundedInt(input.value, definition.restBetweenMovementsSeconds, 0, 3600);
+  if (field === "restBetweenMovementsSeconds") {
+    definition.restBetweenMovementsSeconds = boundedInt(input.value, definition.restBetweenMovementsSeconds, 0, 3600);
+    definition.movements.forEach(function (movement) { movement.restAfterSeconds = definition.restBetweenMovementsSeconds; });
+  }
   if (field === "restBetweenRoundsSeconds") definition.restBetweenRoundsSeconds = boundedInt(input.value, definition.restBetweenRoundsSeconds, 0, 3600);
-  saveData();
-  render();
+  persistEditedDefinition(definition);
 }
 
 function updateSupersetDefinitionMovementField(input) {
-  const definition = getDefinition(activeDefinitionId);
+  const definition = getEditableDefinition(input.dataset.supersetId || activeDefinitionId);
   if (!definition || definition.type !== "superset") return;
   const movement = definition.movements.find(function (candidate) {
     return candidate.id === input.dataset.supersetMovementId;
@@ -765,8 +838,93 @@ function updateSupersetDefinitionMovementField(input) {
   if (field === "reps") movement.reps = boundedInt(input.value, movement.reps, 1, 1000);
   if (field === "durationSeconds") movement.durationSeconds = boundedInt(input.value, movement.durationSeconds, 1, 10800);
   if (field === "weightKg") movement.weightKg = cleanWeight(input.value);
-  saveData();
+  if (field === "restAfterSeconds") movement.restAfterSeconds = boundedInt(input.value, movement.restAfterSeconds, 0, 3600);
+  persistEditedDefinition(definition);
+}
+
+function setSupersetRestMode(definitionId, mode) {
+  const definition = getEditableDefinition(definitionId);
+  if (!definition || definition.type !== "superset" || !["none", "equal", "individual"].includes(mode)) return;
+  if (mode === "individual" && definition.restMode !== "individual") {
+    definition.movements.forEach(function (movement) {
+      movement.restAfterSeconds = definition.restBetweenMovementsSeconds;
+    });
+  }
+  definition.restMode = mode;
+  persistEditedDefinition(definition);
+}
+
+function addSingleComposer() {
+  const nameField = appRoot.querySelector("[data-single-draft-name]");
+  const name = nameField ? nameField.value.trim() : "";
+  if (!name) {
+    if (nameField) nameField.focus();
+    return;
+  }
+  const definition = composer && composer.definition;
+  if (!definition || definition.type !== "single") return;
+  definition.name = name;
+  state.definitions.push(definition);
+  if (!saveData()) {
+    state.definitions = state.definitions.filter(function (item) { return item.id !== definition.id; });
+    return;
+  }
+  composer = null;
+  activeMuscleRole = composerPreviousMuscleRole;
   render();
+}
+
+
+function addSupersetComposer() {
+  const definition = composer && composer.definition;
+  if (!definition || definition.type !== "superset" || definition.movements.length < 2) {
+    window.alert("برای ساخت سوپرست دست‌کم دو حرکت لازم است.");
+    return;
+  }
+  definition.name = autoSupersetName(definition);
+  state.definitions.push(definition);
+  if (composer.addToProgram) state.program.items.push(createProgramItem(definition.id));
+  if (!saveData()) {
+    state.definitions = state.definitions.filter(function (item) { return item.id !== definition.id; });
+    state.program.items = state.program.items.filter(function (item) { return item.exerciseId !== definition.id; });
+    return;
+  }
+  composer = null;
+  activeMuscleRole = composerPreviousMuscleRole;
+  render();
+}
+
+function openComposer(type, addToProgram) {
+  composerReturnAction = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.action || null
+    : null;
+  composerPreviousMuscleRole = activeMuscleRole;
+  activeMuscleRole = "primary";
+  if (type === "single") {
+    composer = { type: "single", definition: { id: createId(), name: "", type: "single", primary: [], secondary: [] } };
+  } else {
+    composer = {
+      type: "superset",
+      addToProgram: Boolean(addToProgram),
+      definition: {
+        id: createId(), name: "", type: "superset", primary: [], secondary: [], movements: [], rounds: 3,
+        restMode: "none", restBetweenMovementsSeconds: 0, restBetweenRoundsSeconds: 90
+      }
+    };
+  }
+  render();
+  const target = composer.type === "single" ? appRoot.querySelector("[data-single-draft-name]") : appRoot.querySelector(".add-superset-movement-form select");
+  if (target) target.focus();
+}
+
+function closeComposer() {
+  composer = null;
+  activeMuscleRole = composerPreviousMuscleRole;
+  render();
+  if (composerReturnAction) {
+    const focusTarget = appRoot.querySelector('[data-action="' + composerReturnAction + '"]');
+    if (focusTarget) focusTarget.focus();
+  }
 }
 
 function createProgramItem(definitionId) {
@@ -818,6 +976,7 @@ function deleteDefinition(id) {
   state.definitions.forEach(function (item) {
     if (item.type === "superset") {
       item.movements = item.movements.filter(function (movement) { return movement.exerciseId !== id; });
+      item.name = autoSupersetName(item) || "سوپرست ناتمام";
     }
   });
   state.program.items = state.program.items.filter(function (item) { return item.exerciseId !== id; });
@@ -855,6 +1014,11 @@ function updateDefinitionField(input) {
   const definition = getDefinition(activeDefinitionId);
   if (!definition || input.dataset.definitionField !== "name") return;
   definition.name = input.value.trim() || "حرکت جدید";
+  state.definitions.forEach(function (candidate) {
+    if (candidate.type === "superset" && candidate.movements.some(function (movement) { return movement.exerciseId === definition.id; })) {
+      candidate.name = autoSupersetName(candidate) || "سوپرست ناتمام";
+    }
+  });
   saveData();
   render();
 }
@@ -876,13 +1040,17 @@ function loadSvgTemplate() {
 }
 
 async function attachBodyMap(definitionId) {
-  const host = appRoot.querySelector("#body-map");
+  const host = Array.from(appRoot.querySelectorAll(".body-map[data-body-map-for]")).find(function (candidate) {
+    return candidate.dataset.bodyMapFor === definitionId;
+  });
   if (!host) return;
   try {
     const template = await loadSvgTemplate();
-    if (pageKind !== "exercises" || activeDefinitionId !== definitionId || !appRoot.querySelector("#body-map")) return;
+    const definition = getEditableDefinition(definitionId);
+    if (!definition || !host.isConnected) return;
     const svg = document.importNode(template, true);
     svg.classList.add("body-map-svg");
+    svg.setAttribute("focusable", "false");
     svg.setAttribute("role", "group");
     svg.setAttribute("aria-label", "نقشهٔ قابل لمس ماهیچه‌ها");
     let count = 0;
@@ -891,7 +1059,9 @@ async function attachBodyMap(definitionId) {
       if (!MUSCLE_GROUPS.includes(className)) return;
       group.classList.add("muscle-area");
       group.dataset.muscle = className;
-      group.setAttribute("tabindex", "0");
+      if (window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+        group.setAttribute("tabindex", "0");
+      }
       group.setAttribute("role", "button");
       group.setAttribute("aria-label", MUSCLE_NAMES[className] || "ماهیچه");
       group.setAttribute("title", MUSCLE_NAMES[className] || "ماهیچه");
@@ -899,26 +1069,30 @@ async function attachBodyMap(definitionId) {
     });
     if (!count) throw new Error("No muscle groups in SVG");
     host.replaceChildren(svg);
-    const note = appRoot.querySelector("#map-note");
+    const note = host.closest(".muscle-editor").querySelector(".map-note");
     if (note) note.textContent = "برای انتخاب، ناحیهٔ موردنظر را لمس کن.";
     updateMuscleSelection(definitionId);
   } catch (error) {
-    const note = appRoot.querySelector("#map-note");
+    const note = host.closest(".muscle-editor").querySelector(".map-note");
     if (note) note.textContent = "برای انتخاب روی شکل، صفحه را از آدرس محلی یا HTTPS باز کن.";
   }
 }
 
 function updateMuscleSelection(definitionId) {
-  const definition = getDefinition(definitionId);
+  const definition = getEditableDefinition(definitionId);
   if (!definition) return;
-  appRoot.querySelectorAll("#body-map [data-muscle]").forEach(function (area) {
-    const primary = definition.primary.includes(area.dataset.muscle);
-    const secondary = definition.secondary.includes(area.dataset.muscle);
-    area.classList.toggle("is-primary", primary);
-    area.classList.toggle("is-secondary", secondary);
-    area.setAttribute("aria-pressed", String(primary || secondary));
+  appRoot.querySelectorAll(".body-map[data-body-map-for]").forEach(function (host) {
+    if (host.dataset.bodyMapFor !== definitionId) return;
+    host.querySelectorAll("[data-muscle]").forEach(function (area) {
+      const primary = definition.primary.includes(area.dataset.muscle);
+      const secondary = definition.secondary.includes(area.dataset.muscle);
+      area.classList.toggle("is-primary", primary);
+      area.classList.toggle("is-secondary", secondary);
+      area.setAttribute("aria-pressed", String(primary || secondary));
+    });
   });
   appRoot.querySelectorAll("[data-muscle-option]").forEach(function (button) {
+    if (button.dataset.definitionId !== definitionId) return;
     const group = button.dataset.muscle;
     const primary = definition.primary.includes(group);
     const secondary = definition.secondary.includes(group);
@@ -934,19 +1108,20 @@ function updateMuscleSelection(definitionId) {
     if (state) state.textContent = selectedRole === "primary" ? "اصلی" :
       selectedRole === "secondary" ? "فرعی" : "انتخاب";
   });
-  const primaryCount = appRoot.querySelector("#primary-count");
-  const secondaryCount = appRoot.querySelector("#secondary-count");
+  const primaryCount = appRoot.querySelector('[data-primary-count="' + definitionId + '"]');
+  const secondaryCount = appRoot.querySelector('[data-secondary-count="' + definitionId + '"]');
   if (primaryCount) primaryCount.textContent = number(definition.primary.length);
   if (secondaryCount) secondaryCount.textContent = number(definition.secondary.length);
   appRoot.querySelectorAll("[data-action='select-muscle-role']").forEach(function (button) {
+    if (button.dataset.definitionId !== definitionId) return;
     const active = button.dataset.role === activeMuscleRole;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
 }
 
-function toggleMuscle(group) {
-  const definition = getDefinition(activeDefinitionId);
+function toggleMuscle(group, definitionId) {
+  const definition = getEditableDefinition(definitionId || activeDefinitionId);
   if (!definition || !MUSCLE_GROUPS.includes(group)) return;
   const selected = definition[activeMuscleRole];
   const removing = selected.includes(group);
@@ -957,9 +1132,13 @@ function toggleMuscle(group) {
     definition[opposite] = definition[opposite].filter(function (value) { return value !== group; });
     selected.push(group);
   }
-  saveData();
+  if (getDefinition(definition.id)) saveData();
   updateMuscleSelection(definition.id);
-  const toast = appRoot.querySelector("#selection-toast");
+  const targetEditor = Array.from(appRoot.querySelectorAll(".muscle-editor")).find(function (candidate) {
+    const host = candidate.querySelector(".body-map[data-body-map-for]");
+    return host && host.dataset.bodyMapFor === definition.id;
+  });
+  const toast = targetEditor ? targetEditor.querySelector(".selection-toast") : null;
   if (toast) {
     toast.textContent = (MUSCLE_NAMES[group] || "ماهیچه") + (removing
       ? " از فهرست ماهیچه‌های " + (activeMuscleRole === "primary" ? "اصلی" : "فرعی") + " برداشته شد."
@@ -982,9 +1161,22 @@ appRoot.addEventListener("submit", function (event) {
   const form = event.target.closest("form[data-form]");
   if (!form) return;
   event.preventDefault();
-  if (form.dataset.form === "new-definition") addDefinition(form);
+  if (form.dataset.form === "save-single-composer") addSingleComposer();
   if (form.dataset.form === "add-program-item") addProgramItem(form);
   if (form.dataset.form === "add-superset-definition-movement") addSupersetDefinitionMovement(form);
+});
+
+appRoot.addEventListener("pointerdown", function (event) {
+  const muscleArea = event.target.closest(".body-map[data-body-map-for] g[data-muscle]");
+  if (muscleArea) muscleArea.classList.add("is-pressed");
+});
+
+["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+  appRoot.addEventListener(eventName, function () {
+    appRoot.querySelectorAll(".body-map .muscle-area.is-pressed").forEach(function (area) {
+      area.classList.remove("is-pressed");
+    });
+  });
 });
 
 appRoot.addEventListener("change", function (event) {
@@ -997,37 +1189,53 @@ appRoot.addEventListener("change", function (event) {
 });
 
 appRoot.addEventListener("click", function (event) {
-  const muscleArea = event.target.closest("#body-map g[data-muscle]");
+  const backdrop = event.target.closest("[data-modal-backdrop]");
+  if (backdrop && event.target === backdrop) {
+    closeComposer();
+    return;
+  }
+  const muscleArea = event.target.closest(".body-map[data-body-map-for] g[data-muscle]");
   if (muscleArea) {
-    toggleMuscle(muscleArea.dataset.muscle);
+    event.preventDefault();
+    toggleMuscle(muscleArea.dataset.muscle, muscleArea.closest(".body-map").dataset.bodyMapFor);
     return;
   }
   const button = event.target.closest("[data-action]");
   if (!button || button.disabled) return;
   if (button.dataset.action === "open-definition") selectDefinition(button.dataset.id);
+  if (button.dataset.action === "open-single-composer") openComposer("single", false);
+  if (button.dataset.action === "open-superset-composer") openComposer("superset", false);
+  if (button.dataset.action === "open-program-superset") openComposer("superset", true);
+  if (button.dataset.action === "close-composer") closeComposer();
+  if (button.dataset.action === "save-superset-composer") addSupersetComposer();
   if (button.dataset.action === "back-to-library") {
     activeDefinitionId = null;
     window.history.replaceState({}, "", "./exercises.html");
     render();
   }
   if (button.dataset.action === "delete-definition") deleteDefinition(button.dataset.id);
-  if (button.dataset.action === "toggle-muscle") toggleMuscle(button.dataset.muscle);
+  if (button.dataset.action === "toggle-muscle") toggleMuscle(button.dataset.muscle, button.dataset.definitionId);
   if (button.dataset.action === "export-program") exportProgram();
   if (button.dataset.action === "select-muscle-role") {
     activeMuscleRole = button.dataset.role === "secondary" ? "secondary" : "primary";
-    updateMuscleSelection(activeDefinitionId);
+    updateMuscleSelection(button.dataset.definitionId);
   }
+  if (button.dataset.action === "set-superset-rest-mode") setSupersetRestMode(button.dataset.supersetId, button.dataset.mode);
   if (button.dataset.action === "move-block") reorderBlock(button.dataset.id, button.dataset.direction);
-  if (button.dataset.action === "move-superset-definition-movement") moveSupersetDefinitionMovement(button.dataset.id, button.dataset.direction);
-  if (button.dataset.action === "remove-superset-definition-movement") removeSupersetDefinitionMovement(button.dataset.id);
+  if (button.dataset.action === "move-superset-definition-movement") moveSupersetDefinitionMovement(button.dataset.id, button.dataset.direction, button.dataset.supersetId);
+  if (button.dataset.action === "remove-superset-definition-movement") removeSupersetDefinitionMovement(button.dataset.id, button.dataset.supersetId);
   if (button.dataset.action === "remove-program-item") removeProgramItem(button.dataset.id);
 });
 
 appRoot.addEventListener("keydown", function (event) {
-  const muscleArea = event.target.closest("#body-map g[data-muscle]");
+  if (event.key === "Escape" && composer) {
+    closeComposer();
+    return;
+  }
+  const muscleArea = event.target.closest(".body-map[data-body-map-for] g[data-muscle]");
   if (muscleArea && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
-    toggleMuscle(muscleArea.dataset.muscle);
+    toggleMuscle(muscleArea.dataset.muscle, muscleArea.closest(".body-map").dataset.bodyMapFor);
   }
 });
 
