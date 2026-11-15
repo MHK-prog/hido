@@ -8,21 +8,25 @@
   <title>نوشتن برنامه | hido</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./assets/icons/hido.svg" type="image/svg+xml">
+  <link rel="preload" href="./assets/fonts/Vazirmatn-VF.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body data-page="program">
   <div class="app-shell">
     <header class="topbar">
       <a class="brand" href="./index.html" aria-label="خانهٔ hido"><span class="brand-mark">h</span><span>hido</span></a>
-      <nav class="page-nav" aria-label="صفحه‌های hido">
-        <a class="active" href="./index.html" aria-current="page">نوشتن برنامه</a>
-        <a href="./exercises.html">تعریف حرکت</a>
-      </nav>
+      <div class="topbar-tools">
+        <nav class="page-nav" aria-label="صفحه‌های hido">
+          <a class="active" href="./index.html" aria-current="page">نوشتن برنامه</a>
+          <a href="./exercises.html">تعریف حرکت</a>
+        </nav>
+        <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="تغییر به حالت تیره" title="تغییر به حالت تیره">☾</button>
+      </div>
     </header>
     <main class="app-main" id="app" aria-live="polite">
       <p class="loading-message">در حال بارگذاری…</p>
     </main>
-    <footer class="app-footer">اطلاعات برنامه و حرکت‌ها در همین مرورگر ذخیره می‌شود.</footer>
+    <footer class="app-footer"><span>اطلاعات برنامه و حرکت‌ها در همین مرورگر ذخیره می‌شود.</span><span id="offline-status" role="status">آماده‌سازی آفلاین…</span></footer>
   </div>
   <script src="./app.js" defer></script>
 </body>

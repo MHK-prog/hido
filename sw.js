@@ -1,6 +1,9 @@
 "use strict";
 
-const CACHE_NAME = "hido-simple-v10";
+// Increase APP_VERSION whenever an application-shell file changes.
+const APP_VERSION = "11";
+const CACHE_PREFIX = "hido-app-shell-v";
+const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -9,6 +12,8 @@ const APP_SHELL = [
   "./app.js",
   "./manifest.webmanifest",
   "./full_body.svg",
+  "./assets/fonts/Vazirmatn-VF.woff2",
+  "./assets/fonts/OFL.txt",
   "./assets/icons/hido.svg",
   "./assets/icons/hido-192.png",
   "./assets/icons/hido-512.png"
@@ -26,7 +31,10 @@ self.addEventListener("activate", function (event) {
   event.waitUntil(
     caches.keys()
       .then(function (keys) {
-        return Promise.all(keys.filter(function (key) { return key !== CACHE_NAME; }).map(function (key) { return caches.delete(key); }));
+        const oldAppCaches = keys.filter(function (key) {
+          return key.indexOf(CACHE_PREFIX) === 0 && key !== CACHE_NAME || key.indexOf("hido-simple-") === 0;
+        });
+        return Promise.all(oldAppCaches.map(function (key) { return caches.delete(key); }));
       })
       .then(function () { return self.clients.claim(); })
   );

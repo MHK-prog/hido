@@ -1,6 +1,7 @@
 "use strict";
 
 const DATA_KEY = "hido.training-builder.v3";
+const THEME_KEY = "hido.theme.v1";
 const PREVIOUS_DATA_KEY = "hido.training-builder.v2";
 const LEGACY_KEY = "hido.exercise-book.v1";
 const LEGACY_SETTINGS_KEY = "hido.workout-plan-settings.v1";
@@ -11,10 +12,10 @@ const MUSCLE_GROUPS = [
   "soreini-kochak", "zir-bagal", "zozanagei"
 ];
 const MUSCLE_NAMES = {
-  "biron-ran": "بخش بیرونی ران", "dakhel-ran": "بخش داخلی ران",
-  "jolo-bazo": "جلوی بازو", "jolo-ran": "جلوی ران", "kmar": "کمر",
+  "biron-ran": "بیرون ران", "dakhel-ran": "داخل ران",
+  "jolo-bazo": "جلو بازو", "jolo-ran": "جلو ران", "kmar": "کمر",
   "pahlo": "پهلو", "posht-bazo": "پشت بازو", "posht-ran": "پشت ران",
-  "saed bala": "بخش بالایی ساعد", "saed pain": "بخش پایینی ساعد",
+  "saed bala": "بالای ساعد", "saed pain": "پایین ساعد",
   "sag-pa jolo": "جلوی ساق پا", "sag-pa posht": "پشت ساق پا",
   "sar-shane": "سرشانه", "shekam": "شکم", "sine": "سینه",
   "soreini-bozorg": "سرینی بزرگ", "soreini-kochak": "سرینی کوچک",
@@ -37,6 +38,24 @@ function number(value) {
   return new Intl.NumberFormat("fa-IR").format(value);
 }
 
+function numberInput(value) {
+  if (value === "" || value === null || typeof value === "undefined") return "";
+  const numeric = Number(normalizeDigits(value));
+  return Number.isFinite(numeric)
+    ? new Intl.NumberFormat("fa-IR", { useGrouping: false, maximumFractionDigits: 2 }).format(numeric)
+    : "";
+}
+
+function normalizeDigits(value) {
+  const persian = "۰۱۲۳۴۵۶۷۸۹";
+  const arabic = "٠١٢٣٤٥٦٧٨٩";
+  return String(value)
+    .replace(/[۰-۹]/g, function (digit) { return String(persian.indexOf(digit)); })
+    .replace(/[٠-٩]/g, function (digit) { return String(arabic.indexOf(digit)); })
+    .replace(/٫/g, ".")
+    .replace(/[٬,]/g, "");
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, function (character) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character];
@@ -44,13 +63,13 @@ function escapeHtml(value) {
 }
 
 function boundedInt(value, fallback, min, max) {
-  const parsed = Number.parseInt(value, 10);
+  const parsed = Number.parseInt(normalizeDigits(value), 10);
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
 }
 
 function cleanWeight(value) {
   if (value === "" || value === null || typeof value === "undefined") return "";
-  const parsed = Number(value);
+  const parsed = Number(normalizeDigits(value));
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) / 100 : "";
 }
 
@@ -348,6 +367,42 @@ function renderNav() {
     '<a href="./exercises.html" class="' + (pageKind === "exercises" ? "active" : "") + '">تعریف حرکت</a></nav>';
 }
 
+function applyTheme(theme) {
+  const selectedTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = selectedTheme;
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.content = selectedTheme === "dark" ? "#111714" : "#f4f5ef";
+  document.querySelectorAll("[data-action='toggle-theme']").forEach(function (button) {
+    const label = selectedTheme === "dark" ? "تغییر به حالت روشن" : "تغییر به حالت تیره";
+    button.textContent = selectedTheme === "dark" ? "☀" : "☾";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.setAttribute("aria-pressed", String(selectedTheme === "dark"));
+  });
+}
+
+function initializeTheme() {
+  let theme = "light";
+  try {
+    theme = window.localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+  } catch (error) {
+    theme = "light";
+  }
+  applyTheme(theme);
+}
+
+document.addEventListener("click", function (event) {
+  const button = event.target.closest("[data-action='toggle-theme']");
+  if (!button) return;
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(nextTheme);
+  try {
+    window.localStorage.setItem(THEME_KEY, nextTheme);
+  } catch (error) {
+    // Keep the selected theme active for this page even if storage is unavailable.
+  }
+});
+
 function renderProgramItem(item) {
   const definition = getDefinition(item.exerciseId);
   if (!definition) return "";
@@ -371,8 +426,8 @@ function renderProgramItem(item) {
   const typeOptions = '<option value="reps" ' + (item.type === "reps" ? "selected" : "") + '>تکراری</option>' +
     '<option value="time" ' + (item.type === "time" ? "selected" : "") + '>تایمی</option>';
   const amountControl = item.type === "reps"
-    ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="reps" type="number" min="1" max="1000" value="' + item.reps + '"></label>'
-    : '<label class="field-label">زمان هر حرکت <span>(ثانیه)</span><input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="durationSeconds" type="number" min="1" max="10800" step="5" value="' + item.durationSeconds + '"></label>';
+    ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="reps" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(item.reps) + '"></label>'
+    : '<label class="field-label">زمان هر حرکت <span>(ثانیه)</span><input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="durationSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(item.durationSeconds) + '"></label>';
   return '<article class="program-movement">' +
     '<div class="program-movement-heading"><span class="pair-marker">تکی</span>' +
     '<strong>' + escapeHtml(definition.name) + '</strong>' +
@@ -380,10 +435,10 @@ function renderProgramItem(item) {
     '<button class="small-action remove-action" type="button" data-action="remove-program-item" data-id="' + escapeHtml(item.id) + '">حذف از برنامه</button></div>' +
     '<div class="prescription-grid">' +
     '<label class="field-label">نوع اجرا<select class="select-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="type">' + typeOptions + '</select></label>' +
-    '<label class="field-label">تعداد ست<input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="sets" type="number" min="1" max="50" value="' + item.sets + '"></label>' +
+    '<label class="field-label">تعداد ست<input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="sets" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(item.sets) + '"></label>' +
     amountControl +
-    '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="weightKg" type="number" min="0" max="5000" step="0.25" placeholder="وزن بدن" value="' + (item.weightKg === "" ? "" : item.weightKg) + '"></label>' +
-    '<label class="field-label">استراحت بین ست‌های این حرکت <span>(ثانیه)</span><input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="restBetweenSetsSeconds" type="number" min="0" max="3600" step="5" value="' + item.restBetweenSetsSeconds + '"></label>' +
+    '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="weightKg" type="text" inputmode="decimal" autocomplete="off" placeholder="وزن بدن" value="' + numberInput(item.weightKg) + '"></label>' +
+    '<label class="field-label">استراحت بین ست‌های این حرکت <span>(ثانیه)</span><input class="number-input" data-item-id="' + escapeHtml(item.id) + '" data-item-field="restBetweenSetsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(item.restBetweenSetsSeconds) + '"></label>' +
     '</div></article>';
 }
 
@@ -407,6 +462,104 @@ function getProgramBlocks() {
   });
 }
 
+function renderExportProgramItem(item, index) {
+  const definition = getDefinition(item.exerciseId);
+  if (!definition) return "";
+  let details = "";
+
+  if (definition.type === "superset") {
+    const movements = definition.movements.map(function (movement, movementIndex) {
+      const child = getDefinition(movement.exerciseId);
+      if (!child) return "";
+      const amount = movement.type === "reps"
+        ? number(movement.reps) + " تکرار"
+        : number(movement.durationSeconds) + " ثانیه";
+      const weight = movement.weightKg === "" ? "" : " · " + number(movement.weightKg) + " کیلوگرم";
+      return '<li><strong>' + number(movementIndex + 1) + ". " + escapeHtml(child.name) +
+        '</strong><span>' + amount + weight + '</span></li>';
+    }).join("");
+    details = '<p class="summary">' + number(definition.rounds) + " دور کامل · استراحت بین حرکت‌ها: " +
+      number(definition.restBetweenMovementsSeconds) + " ثانیه · استراحت بین دورها: " +
+      number(definition.restBetweenRoundsSeconds) + ' ثانیه</p><ol>' + movements + "</ol>";
+  } else {
+    const amount = item.type === "reps"
+      ? number(item.reps) + " تکرار در هر ست"
+      : number(item.durationSeconds) + " ثانیه برای هر ست";
+    const weight = item.weightKg === "" ? "" : " · وزنهٔ " + number(item.weightKg) + " کیلوگرم";
+    details = '<p class="summary">' + number(item.sets) + " ست · " + amount + weight +
+      " · استراحت بین ست‌ها: " + number(item.restBetweenSetsSeconds) + " ثانیه</p>";
+  }
+
+  const rest = index < state.program.items.length - 1
+    ? '<p class="block-rest">استراحت پس از این بخش: ' +
+      number(state.program.restBetweenExercisesSeconds) + " ثانیه</p>"
+    : "";
+  return '<section class="program-item"><h2>' + number(index + 1) + ". " +
+    escapeHtml(definition.name) + '</h2>' + details + rest + "</section>";
+}
+
+async function exportProgram() {
+  if (!state.program.items.length) {
+    window.alert("برنامه‌ای برای خروجی گرفتن وجود ندارد.");
+    return;
+  }
+
+  let fontBase64 = "";
+  let fontLicense = "";
+  try {
+    const fontResponse = await fetch("./assets/fonts/Vazirmatn-VF.woff2");
+    if (fontResponse.ok) {
+      const fontBytes = new Uint8Array(await fontResponse.arrayBuffer());
+      let binaryFont = "";
+      for (let offset = 0; offset < fontBytes.length; offset += 32768) {
+        binaryFont += String.fromCharCode.apply(null, fontBytes.subarray(offset, offset + 32768));
+      }
+      fontBase64 = window.btoa(binaryFont);
+    }
+  } catch (error) {
+    fontBase64 = "";
+  }
+  try {
+    const licenseResponse = await fetch("./assets/fonts/OFL.txt");
+    if (licenseResponse.ok) fontLicense = escapeHtml(await licenseResponse.text());
+  } catch (error) {
+    fontLicense = "";
+  }
+
+  const embeddedFont = fontBase64
+    ? "@font-face{font-family:Vazirmatn;src:url(data:font/woff2;base64," + fontBase64 +
+      ") format('woff2');font-weight:100 900;font-display:swap}"
+    : "";
+  const licenseSection = fontLicense
+    ? '<details class="license"><summary>مجوز قلم وزیرمتن</summary><pre>' + fontLicense + "</pre></details>"
+    : "";
+  const content = state.program.items.map(renderExportProgramItem).join("");
+  const html = '<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><title>' +
+    escapeHtml(state.program.name) + " | hido</title><style>" + embeddedFont +
+    'body{margin:0;background:#f4f5ef;color:#17261e;font-family:Vazirmatn,Tahoma,sans-serif;font-size:17px;line-height:1.9;font-feature-settings:"ss01"}' +
+    '.sheet{max-width:760px;margin:30px auto;padding:28px;background:white;border-radius:20px;box-shadow:0 12px 36px #17261e18}' +
+    'h1{margin:0 0 8px;font-size:28px}.subtitle{color:#667269;margin:0 0 22px}.program-item{padding:16px 0;border-top:1px solid #e5e8df}' +
+    'h2{margin:0 0 7px;font-size:20px}.summary{margin:0 0 10px;color:#465349}.program-item ol{display:grid;gap:8px;padding:0;list-style:none}' +
+    '.program-item li{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.block-rest{margin:8px 0 0;color:#667269;font-size:14px}' +
+    '.toolbar{position:sticky;top:0;padding:12px;text-align:center;background:#f4f5ef}.toolbar button{min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#17261e;color:white;font:inherit;font-weight:700}' +
+    '.license{margin-top:20px;color:#667269;font-size:12px}.license pre{overflow:auto;white-space:pre-wrap;direction:ltr;text-align:left;font:11px monospace}' +
+    '@media print{body{background:white}.toolbar{display:none}.sheet{margin:0 auto;padding:0;box-shadow:none}.program-item{break-inside:avoid}}' +
+    '</style></head><body><div class="toolbar"><button type="button" onclick="window.print()">چاپ / ذخیره به صورت PDF</button></div>' +
+    '<main class="sheet"><h1>' + escapeHtml(state.program.name) + '</h1><p class="subtitle">برنامهٔ تمرینی ساخته‌شده با hido</p>' +
+    content + licenseSection + "</main></body></html>";
+
+  const filename = (state.program.name || "hido").replace(/[\\/:*?"<>|]+/g, "-").trim().slice(0, 70) || "hido";
+  const fileUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = fileUrl;
+  link.download = "hido-" + filename + ".html";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(function () { URL.revokeObjectURL(fileUrl); }, 1000);
+}
+
 function renderProgramPage() {
   const program = state.program;
   const blocks = getProgramBlocks();
@@ -421,10 +574,11 @@ function renderProgramPage() {
     return '<option value="' + escapeHtml(definition.id) + '">[' + typeLabel + '] ' + escapeHtml(definition.name) + '</option>';
   }).join("");
   return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p>' +
-    '<h1>نوشتن برنامه</h1><p class="page-intro">حرکت تکی یا سوپرست آماده را به برنامه اضافه کن و ترتیب بلوک‌ها را بچین. جزئیات هر سوپرست از صفحهٔ تعریف حرکت ویرایش می‌شود.</p></header>' +
+    '<h1>نوشتن برنامه</h1><p class="page-intro">حرکت تکی یا سوپرست آماده را به برنامه اضافه کن و ترتیب بلوک‌ها را بچین. جزئیات هر سوپرست از صفحهٔ تعریف حرکت ویرایش می‌شود.</p>' +
+    '<div class="heading-actions"><button class="export-button" type="button" data-action="export-program">دریافت خروجی آفلاین</button></div></header>' +
     '<section class="plan-settings"><div class="section-heading"><div><p class="eyebrow">تنظیم برنامه</p><h2>نام و استراحت برنامه</h2></div></div>' +
     '<label class="field-label">نام برنامه<input class="text-input" data-program-field="name" maxlength="80" value="' + escapeHtml(program.name) + '"></label>' +
-    '<label class="field-label">استراحت بین حرکت‌های برنامه <span>(ثانیه)</span><input class="number-input" data-program-field="restBetweenExercisesSeconds" type="number" min="0" max="3600" step="5" value="' + program.restBetweenExercisesSeconds + '"></label>' +
+    '<label class="field-label">استراحت بین حرکت‌های برنامه <span>(ثانیه)</span><input class="number-input" data-program-field="restBetweenExercisesSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(program.restBetweenExercisesSeconds) + '"></label>' +
     '<p class="field-help">این استراحت بعد از حرکت تکی یا بعد از پایان یک بلوک سوپرست اعمال می‌شود.</p></section>' +
     (programDefinitions.length
       ? '<form class="add-movement-form" data-form="add-program-item"><select class="select-input" name="definition-id" required><option value="">انتخاب حرکت تعریف‌شده</option>' + options +
@@ -464,10 +618,11 @@ function renderDefinitionEditor(definition) {
   const typeLabel = definition.type === "superset" ? "ترکیبی · سوپرست" : "حرکت تکی";
   const editorBody = definition.type === "superset"
     ? renderSupersetDefinitionEditor(definition)
-    : '<div class="map-instructions"><span class="instruction-icon">●</span><span>نقش ماهیچه را از نوار پایین انتخاب کن و ناحیهٔ درگیر را روی شکل لمس کن.</span></div>' +
+    : '<div class="map-instructions"><span class="instruction-icon">●</span><span>نقش ماهیچه را از نوار پایین انتخاب کن؛ بعد از روی شکل یا فهرست فارسی ماهیچه‌ها را بزن.</span></div>' +
       '<div class="body-map" id="body-map"><img class="body-map-fallback" src="./full_body.svg" alt="نقشهٔ ماهیچه‌های بدن"></div>' +
       '<p class="map-note" id="map-note" role="status">ماهیچه‌های انتخاب‌شده با رنگ نقششان مشخص می‌شوند.</p>' +
       '<div class="map-legend"><span><i class="legend-dot primary-dot"></i>اصلی</span><span><i class="legend-dot secondary-dot"></i>فرعی</span></div>' +
+      renderMusclePicker(definition) +
       '<div class="selection-toast" id="selection-toast" role="status" aria-live="polite"></div>' +
       '<div class="role-dock" role="group" aria-label="انتخاب نقش ماهیچه">' +
       '<button class="role-button active" type="button" data-action="select-muscle-role" data-role="primary" aria-pressed="true"><span>ماهیچهٔ اصلی</span><small><b id="primary-count">' + number(definition.primary.length) + '</b> انتخاب</small></button>' +
@@ -481,6 +636,22 @@ function renderDefinitionEditor(definition) {
     editorBody + '</section>';
 }
 
+function renderMusclePicker(definition) {
+  const buttons = MUSCLE_GROUPS.map(function (group) {
+    const role = definition.primary.includes(group) ? "primary" :
+      definition.secondary.includes(group) ? "secondary" : "";
+    const stateLabel = role === "primary" ? "اصلی" : role === "secondary" ? "فرعی" : "انتخاب";
+    return '<button class="muscle-option ' + (role ? "is-" + role : "") +
+      '" type="button" data-action="toggle-muscle" data-muscle="' + escapeHtml(group) +
+      '" data-muscle-option aria-pressed="' + String(role === activeMuscleRole) + '">' +
+      '<span>' + escapeHtml(MUSCLE_NAMES[group]) + '</span><small class="muscle-option-state">' +
+      stateLabel + "</small></button>";
+  }).join("");
+  return '<section class="muscle-picker" aria-label="انتخاب ماهیچه از فهرست"><h3>انتخاب از فهرست فارسی</h3>' +
+    '<p class="field-help">هر بار زدن، ماهیچه را به نقش انتخاب‌شده اضافه یا از همان نقش حذف می‌کند.</p>' +
+    '<div class="muscle-picker-list">' + buttons + "</div></section>";
+}
+
 function renderSupersetDefinitionEditor(definition) {
   const options = state.definitions.filter(function (candidate) {
     return candidate.type === "single";
@@ -491,8 +662,8 @@ function renderSupersetDefinitionEditor(definition) {
     const child = getDefinition(movement.exerciseId);
     if (!child) return "";
     const amount = movement.type === "reps"
-      ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="reps" type="number" min="1" max="1000" value="' + movement.reps + '"></label>'
-      : '<label class="field-label">زمان اجرای این حرکت <span>(ثانیه)</span><input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="durationSeconds" type="number" min="1" max="10800" step="5" value="' + movement.durationSeconds + '"></label>';
+      ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="reps" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.reps) + '"></label>'
+      : '<label class="field-label">زمان اجرای این حرکت <span>(ثانیه)</span><input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="durationSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.durationSeconds) + '"></label>';
     return '<article class="superset-definition-movement"><div class="superset-definition-movement-heading"><span class="pair-marker">حرکت ' + number(index + 1) + '</span>' +
       '<strong>' + escapeHtml(child.name) + '</strong><div class="member-actions">' +
       '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-id="' + escapeHtml(movement.id) + '" data-direction="up" aria-label="جابجایی حرکت به بالا" ' + (index === 0 ? "disabled" : "") + '>↑</button>' +
@@ -500,12 +671,12 @@ function renderSupersetDefinitionEditor(definition) {
       '<button class="small-action remove-action" type="button" data-action="remove-superset-definition-movement" data-id="' + escapeHtml(movement.id) + '">حذف</button></div>' +
       '<div class="prescription-grid"><label class="field-label">نوع اجرا<select class="select-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="type">' +
       '<option value="reps" ' + (movement.type === "reps" ? "selected" : "") + '>تکراری</option><option value="time" ' + (movement.type === "time" ? "selected" : "") + '>تایمی</option></select></label>' + amount +
-      '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="weightKg" type="number" min="0" max="5000" step="0.25" placeholder="وزن بدن" value="' + (movement.weightKg === "" ? "" : movement.weightKg) + '"></label></div></article>';
+      '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="weightKg" type="text" inputmode="decimal" autocomplete="off" placeholder="وزن بدن" value="' + numberInput(movement.weightKg) + '"></label></div></article>';
   }).join("");
   return '<section class="superset-definition-builder"><div class="map-instructions"><span class="instruction-icon">●</span><span>این سوپرست یک مینی‌برنامه است: حرکت‌های تکی را به ترتیب اضافه کن و نسخهٔ اجرای هر کدام را جدا تنظیم کن.</span></div>' +
-    '<div class="superset-definition-settings"><label class="field-label">تعداد ست سوپرست <span>(هر ست یک دور کامل)</span><input class="number-input" data-superset-field="rounds" type="number" min="1" max="50" value="' + definition.rounds + '"></label>' +
-    '<label class="field-label">استراحت بین حرکت‌های هر دور <span>(ثانیه)</span><input class="number-input" data-superset-field="restBetweenMovementsSeconds" type="number" min="0" max="3600" step="5" value="' + definition.restBetweenMovementsSeconds + '"></label>' +
-    '<label class="field-label">استراحت بین ست‌های سوپرست <span>(ثانیه)</span><input class="number-input" data-superset-field="restBetweenRoundsSeconds" type="number" min="0" max="3600" step="5" value="' + definition.restBetweenRoundsSeconds + '"></label></div>' +
+    '<div class="superset-definition-settings"><label class="field-label">تعداد ست سوپرست <span>(هر ست یک دور کامل)</span><input class="number-input" data-superset-field="rounds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.rounds) + '"></label>' +
+    '<label class="field-label">استراحت بین حرکت‌های هر دور <span>(ثانیه)</span><input class="number-input" data-superset-field="restBetweenMovementsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.restBetweenMovementsSeconds) + '"></label>' +
+    '<label class="field-label">استراحت بین ست‌های سوپرست <span>(ثانیه)</span><input class="number-input" data-superset-field="restBetweenRoundsSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(definition.restBetweenRoundsSeconds) + '"></label></div>' +
     (state.definitions.some(function (candidate) { return candidate.type === "single"; })
       ? '<form class="add-superset-movement-form" data-form="add-superset-definition-movement"><select class="select-input" name="exercise-id" aria-label="انتخاب حرکت تکی برای سوپرست" required><option value="">انتخاب حرکت تکی</option>' + options + '</select><button class="primary-button" type="submit">افزودن به سوپرست</button></form>'
       : '<div class="empty-state compact-empty"><strong>حرکت تکی‌ای برای افزودن نیست</strong><p>اول یک حرکت تکی تعریف کن، بعد آن را به سوپرست اضافه کن.</p><button class="small-action" type="button" data-action="back-to-library">بازگشت به فهرست حرکت‌ها</button></div>') +
@@ -747,6 +918,22 @@ function updateMuscleSelection(definitionId) {
     area.classList.toggle("is-secondary", secondary);
     area.setAttribute("aria-pressed", String(primary || secondary));
   });
+  appRoot.querySelectorAll("[data-muscle-option]").forEach(function (button) {
+    const group = button.dataset.muscle;
+    const primary = definition.primary.includes(group);
+    const secondary = definition.secondary.includes(group);
+    const selectedRole = primary ? "primary" : secondary ? "secondary" : "";
+    const state = button.querySelector(".muscle-option-state");
+    button.classList.toggle("is-primary", primary);
+    button.classList.toggle("is-secondary", secondary);
+    button.setAttribute("aria-pressed", String(selectedRole === activeMuscleRole));
+    button.setAttribute("aria-label", MUSCLE_NAMES[group] + (selectedRole
+      ? "، ماهیچهٔ " + (selectedRole === "primary" ? "اصلی" : "فرعی")
+      : "، انتخاب نشده") + "؛ نقش فعال: " +
+      (activeMuscleRole === "primary" ? "اصلی" : "فرعی"));
+    if (state) state.textContent = selectedRole === "primary" ? "اصلی" :
+      selectedRole === "secondary" ? "فرعی" : "انتخاب";
+  });
   const primaryCount = appRoot.querySelector("#primary-count");
   const secondaryCount = appRoot.querySelector("#secondary-count");
   if (primaryCount) primaryCount.textContent = number(definition.primary.length);
@@ -824,6 +1011,8 @@ appRoot.addEventListener("click", function (event) {
     render();
   }
   if (button.dataset.action === "delete-definition") deleteDefinition(button.dataset.id);
+  if (button.dataset.action === "toggle-muscle") toggleMuscle(button.dataset.muscle);
+  if (button.dataset.action === "export-program") exportProgram();
   if (button.dataset.action === "select-muscle-role") {
     activeMuscleRole = button.dataset.role === "secondary" ? "secondary" : "primary";
     updateMuscleSelection(activeDefinitionId);
@@ -848,10 +1037,39 @@ window.addEventListener("popstate", function () {
   render();
 });
 
+initializeTheme();
 render();
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", function () {
-    navigator.serviceWorker.register("./sw.js").catch(function () {});
+  const offlineStatus = document.getElementById("offline-status");
+  const hadControllerAtStart = Boolean(navigator.serviceWorker.controller);
+  let refreshingAfterUpdate = false;
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (!hadControllerAtStart || refreshingAfterUpdate) return;
+    refreshingAfterUpdate = true;
+    window.location.reload();
   });
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+      .then(function (registration) {
+        const checkForUpdate = function () {
+          if (navigator.onLine) registration.update().catch(function () {});
+        };
+        checkForUpdate();
+        window.addEventListener("online", checkForUpdate);
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "visible") checkForUpdate();
+        });
+        return navigator.serviceWorker.ready;
+      })
+      .then(function () {
+        if (offlineStatus) offlineStatus.textContent = "hido برای استفادهٔ آفلاین آماده است.";
+      })
+      .catch(function () {
+        if (offlineStatus) offlineStatus.textContent = "برای آماده‌سازی آفلاین، یک‌بار به اینترنت وصل شو.";
+      });
+  });
+} else {
+  const offlineStatus = document.getElementById("offline-status");
+  if (offlineStatus) offlineStatus.textContent = "این مرورگر از استفادهٔ آفلاین پشتیبانی نمی‌کند.";
 }
