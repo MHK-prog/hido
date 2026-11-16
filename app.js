@@ -23,15 +23,30 @@ const MUSCLE_NAMES = {
 };
 
 const appRoot = document.getElementById("app");
-const pageKind = document.body.dataset.page === "exercises" ? "exercises" : "program";
+const pageKind = ["exercises", "programs"].includes(document.body.dataset.page)
+  ? document.body.dataset.page
+  : "program";
 let state = loadData();
 let activeDefinitionId = readDefinitionId();
+let activeProgramId = readProgramId() || state.activeProgramId || (state.program && state.program.id) || null;
+if (activeProgramId) {
+  const requestedProgram = state.programs.find(function (program) { return program.id === activeProgramId; });
+  if (requestedProgram) {
+    state.program = requestedProgram;
+    state.activeProgramId = requestedProgram.id;
+    if (readProgramId()) saveData();
+  }
+}
 let activeMuscleRole = "primary";
 let svgTemplatePromise = null;
 let toastTimer = null;
 let composer = null;
 let composerReturnAction = null;
 let composerPreviousMuscleRole = "primary";
+if (pageKind === "exercises" && activeDefinitionId) {
+  const linkedDefinition = state.definitions.find(function (definition) { return definition.id === activeDefinitionId; });
+  if (linkedDefinition) composer = { type: linkedDefinition.type, definition: JSON.parse(JSON.stringify(linkedDefinition)), editing: true };
+}
 
 function createId() {
   return "hido-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -101,9 +116,8 @@ function sanitizeDefinition(raw) {
           return {
             id: typeof movement.id === "string" ? movement.id : createId(),
             exerciseId: typeof movement.exerciseId === "string" ? movement.exerciseId : "",
-            type: movement.type === "time" ? "time" : "reps",
+            type: "reps",
             reps: boundedInt(movement.reps, 10, 1, 1000),
-            durationSeconds: boundedInt(movement.durationSeconds, 30, 1, 10800),
             weightKg: cleanWeight(movement.weightKg),
             restAfterSeconds: boundedInt(movement.restAfterSeconds, legacyMovementRest, 0, 3600)
           };
@@ -137,8 +151,13 @@ function sanitizeDefinitions(rawDefinitions) {
   return definitions;
 }
 
-function sanitizeProgramItem(raw, definitionIds) {
-  if (!raw || !definitionIds.has(raw.exerciseId)) return null;
+function sanitizeProgramItem(raw, definitions) {
+  if (!raw) return null;
+  const definition = definitions.find(function (candidate) { return candidate.id === raw.exerciseId; });
+  if (!definition) return null;
+  if (definition.type === "superset") {
+    return { id: typeof raw.id === "string" ? raw.id : createId(), exerciseId: raw.exerciseId, type: "superset" };
+  }
   const item = {
     id: typeof raw.id === "string" ? raw.id : createId(),
     exerciseId: raw.exerciseId,
@@ -185,11 +204,12 @@ function normalizeSupersets(items) {
 }
 
 function sanitizeProgram(raw, definitions) {
-  const definitionIds = new Set(definitions.map(function (definition) { return definition.id; }));
+  raw = raw || {};
   const items = Array.isArray(raw.items)
-    ? raw.items.map(function (item) { return sanitizeProgramItem(item, definitionIds); }).filter(Boolean)
+    ? raw.items.map(function (item) { return sanitizeProgramItem(item, definitions); }).filter(Boolean)
     : [];
   return {
+    id: typeof raw.id === "string" ? raw.id : createId(),
     name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : "برنامهٔ تمرینی من",
     restBetweenExercisesSeconds: boundedInt(raw.restBetweenExercisesSeconds, 120, 0, 3600),
     items: normalizeSupersets(items)
@@ -235,9 +255,8 @@ function migrateProgramSupersets(definitions, program) {
         return {
           id: createId(),
           exerciseId: item.exerciseId,
-          type: item.type,
+          type: "reps",
           reps: item.reps,
-          durationSeconds: item.durationSeconds,
           weightKg: item.weightKg,
           restAfterSeconds: firstItem.restBetweenMovementsSeconds
         };
@@ -251,14 +270,7 @@ function migrateProgramSupersets(definitions, program) {
     migratedItems.push({
       id: firstItem.id,
       exerciseId: composite.id,
-      type: "reps",
-      sets: 3,
-      reps: 10,
-      durationSeconds: 30,
-      weightKg: "",
-      restBetweenSetsSeconds: 90,
-      supersetGroup: "",
-      restBetweenMovementsSeconds: 0
+      type: "superset"
     });
     changed = true;
   }
@@ -271,11 +283,24 @@ function migrateProgramSupersets(definitions, program) {
 }
 
 function restoreData(raw) {
-  if (!raw || !Array.isArray(raw.definitions) || !raw.program) return null;
+  if (!raw || !Array.isArray(raw.definitions) || (!raw.program && !Array.isArray(raw.programs))) return null;
   const definitions = sanitizeDefinitions(raw.definitions);
-  const program = sanitizeProgram(raw.program, definitions);
-  const migrated = migrateProgramSupersets(definitions, program);
-  return { data: { definitions: definitions, program: program }, migrated: migrated };
+  const sourcePrograms = Array.isArray(raw.programs) ? raw.programs : [raw.program];
+  if (raw.program && !sourcePrograms.some(function (program) {
+    return program === raw.program || (raw.program.id && program.id === raw.program.id);
+  })) {
+    sourcePrograms.push(raw.program);
+  }
+  const programs = sourcePrograms.filter(Boolean).map(function (program) { return sanitizeProgram(program, definitions); });
+  let migrated = !Array.isArray(raw.programs) || (raw.programs.length > 0 && !raw.activeProgramId) || Boolean(raw.program && !raw.program.id);
+  programs.forEach(function (program) {
+    if (migrateProgramSupersets(definitions, program)) migrated = true;
+  });
+  const activeId = typeof raw.activeProgramId === "string" && programs.some(function (program) { return program.id === raw.activeProgramId; })
+    ? raw.activeProgramId
+    : (raw.program && programs.some(function (program) { return program.id === raw.program.id; }) ? raw.program.id : programs[0] && programs[0].id);
+  const activeProgram = programs.find(function (program) { return program.id === activeId; }) || null;
+  return { data: { definitions: definitions, programs: programs, activeProgramId: activeId, program: activeProgram }, migrated: migrated };
 }
 
 function loadData() {
@@ -331,7 +356,9 @@ function loadData() {
         items: normalizeSupersets(items)
       };
       migrateProgramSupersets(definitions, program);
-      const data = { definitions: definitions, program: program };
+      const programId = createId();
+      program.id = programId;
+      const data = { definitions: definitions, programs: [program], activeProgramId: programId, program: program };
       try {
         window.localStorage.setItem(DATA_KEY, JSON.stringify(data));
       } catch (error) {
@@ -344,13 +371,25 @@ function loadData() {
   }
   return {
     definitions: [],
-    program: { name: "برنامهٔ تمرینی من", restBetweenExercisesSeconds: 120, items: [] }
+    programs: [],
+    activeProgramId: null,
+    program: null
   };
 }
 
 function saveData() {
   try {
-    window.localStorage.setItem(DATA_KEY, JSON.stringify(state));
+    if (state.program) {
+      const index = state.programs.findIndex(function (program) { return program.id === state.program.id; });
+      if (index < 0) state.programs.push(state.program);
+      else state.programs[index] = state.program;
+      state.activeProgramId = state.program.id;
+    }
+    window.localStorage.setItem(DATA_KEY, JSON.stringify({
+      definitions: state.definitions,
+      programs: state.programs,
+      activeProgramId: state.activeProgramId
+    }));
     return true;
   } catch (error) {
     window.alert("ذخیره‌سازی در این مرورگر در دسترس نیست.");
@@ -359,6 +398,7 @@ function saveData() {
 }
 
 function getDefinition(id) {
+  if (composer && composer.editing && composer.definition && composer.definition.id === id) return composer.definition;
   return state.definitions.find(function (definition) { return definition.id === id; });
 }
 
@@ -388,7 +428,7 @@ function supersetRestSummary(definition) {
 }
 
 function getProgramItem(id) {
-  return state.program.items.find(function (item) { return item.id === id; });
+  return state.program && state.program.items.find(function (item) { return item.id === id; });
 }
 
 function readDefinitionId() {
@@ -401,8 +441,19 @@ function readDefinitionId() {
   }
 }
 
+function readProgramId() {
+  const match = window.location.hash.match(/^#program\/(.+)$/);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (error) {
+    return null;
+  }
+}
+
 function renderNav() {
   return '<nav class="page-nav" aria-label="صفحه‌های hido">' +
+    '<a href="./programs.html" class="' + (pageKind === "programs" ? "active" : "") + '">برنامه‌ها</a>' +
     '<a href="./index.html" class="' + (pageKind === "program" ? "active" : "") + '">نوشتن برنامه</a>' +
     '<a href="./exercises.html" class="' + (pageKind === "exercises" ? "active" : "") + '">تعریف حرکت</a></nav>';
 }
@@ -450,13 +501,11 @@ function renderProgramItem(item) {
     const preview = definition.movements.map(function (movement, index) {
       const child = getDefinition(movement.exerciseId);
       if (!child) return "";
-      const dose = movement.type === "reps"
-        ? number(movement.reps) + " تکرار"
-        : number(movement.durationSeconds) + " ثانیه";
+      const dose = number(movement.reps) + " تکرار";
       const weight = movement.weightKg === "" ? "" : " · " + number(movement.weightKg) + " کیلوگرم";
       return '<li><span>' + number(index + 1) + '. ' + escapeHtml(child.name) + '</span><small>' + dose + weight + '</small></li>';
     }).join("");
-    return '<article class="program-movement compound-program-movement"><div class="program-movement-heading"><span class="pair-marker">مینی‌برنامه</span>' +
+    return '<article class="program-movement compound-program-movement"><div class="program-movement-heading"><span class="pair-marker">سوپرست</span>' +
       '<strong>' + escapeHtml(definition.name) + '</strong><a href="./exercises.html#definition/' + encodeURIComponent(definition.id) + '">ویرایش سوپرست</a>' +
       '<button class="small-action remove-action" type="button" data-action="remove-program-item" data-id="' + escapeHtml(item.id) + '">حذف از برنامه</button></div>' +
       '<div class="compound-summary"><strong>' + number(definition.rounds) + ' ست سوپرست</strong><span>' + escapeHtml(supersetRestSummary(definition)) + '</span>' +
@@ -486,7 +535,7 @@ function renderProgramBlock(block, index, blocks) {
   const item = block.items[0];
   const definition = getDefinition(item.exerciseId);
   const isSuperset = definition && definition.type === "superset";
-  return '<section class="program-block ' + (isSuperset ? "is-superset" : "") + '">' +
+  return '<section class="program-block ' + (isSuperset ? "is-superset" : "is-single") + '">' +
     '<div class="program-block-items">' + renderProgramItem(item) + '</div>' +
     '<div class="block-footer"><span>استراحت بین بلوک‌های برنامه: ' +
     number(state.program.restBetweenExercisesSeconds) + ' ثانیه</span><div class="block-actions">' +
@@ -511,14 +560,12 @@ function renderExportProgramItem(item, index) {
     const movements = definition.movements.map(function (movement, movementIndex) {
       const child = getDefinition(movement.exerciseId);
       if (!child) return "";
-      const amount = movement.type === "reps"
-        ? number(movement.reps) + " تکرار"
-        : number(movement.durationSeconds) + " ثانیه";
+      const amount = number(movement.reps) + " تکرار";
       const weight = movement.weightKg === "" ? "" : " · " + number(movement.weightKg) + " کیلوگرم";
       return '<li><strong>' + number(movementIndex + 1) + ". " + escapeHtml(child.name) +
         '</strong><span>' + amount + weight + '</span></li>';
     }).join("");
-    details = '<p class="summary">' + number(definition.rounds) + " دور کامل · " + escapeHtml(supersetRestSummary(definition)) + " · استراحت بین دورها: " +
+    details = '<p class="summary">' + number(definition.rounds) + " ست سوپرست · " + escapeHtml(supersetRestSummary(definition)) + " · استراحت بین ست‌ها: " +
       number(definition.restBetweenRoundsSeconds) + ' ثانیه</p><ol>' + movements + "</ol>";
   } else {
     const amount = item.type === "reps"
@@ -601,6 +648,12 @@ async function exportProgram() {
 
 function renderProgramPage() {
   const program = state.program;
+  if (!program) {
+    return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p>' +
+      '<h1>نوشتن برنامه</h1><p class="page-intro">برای شروع، از فهرست برنامه‌ها یک برنامه بساز یا انتخاب کن.</p></header>' +
+      '<div class="empty-state"><strong>برنامه‌ای انتخاب نشده</strong><p>فهرست برنامه‌ها را باز کن و برنامهٔ تازه بساز.</p>' +
+      '<a class="primary-button link-button" href="./programs.html">رفتن به فهرست برنامه‌ها</a></div></section>';
+  }
   const blocks = getProgramBlocks();
   const blockHtml = blocks.map(function (block, index) {
     return renderProgramBlock(block, index, blocks);
@@ -608,22 +661,17 @@ function renderProgramPage() {
   const programDefinitions = state.definitions.filter(function (definition) {
     return definition.type === "single" || definition.movements.length >= 2;
   });
-  const options = programDefinitions.map(function (definition) {
-    const typeLabel = definition.type === "superset" ? "سوپرست" : "تکی";
-    return '<option value="' + escapeHtml(definition.id) + '">[' + typeLabel + '] ' + escapeHtml(definition.name) + '</option>';
-  }).join("");
   return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p>' +
     '<h1>نوشتن برنامه</h1><p class="page-intro">حرکت تکی یا سوپرست را به برنامه اضافه کن و ترتیب بلوک‌ها را بچین.</p>' +
-    '<div class="heading-actions"><button class="export-button" type="button" data-action="export-program">دریافت خروجی آفلاین</button></div></header>' +
+    '<div class="heading-actions"><a class="small-action" href="./programs.html">فهرست برنامه‌ها</a><button class="export-button" type="button" data-action="export-program">دریافت خروجی آفلاین</button></div></header>' +
     '<section class="plan-settings"><div class="section-heading"><div><p class="eyebrow">تنظیم برنامه</p><h2>نام و استراحت برنامه</h2></div></div>' +
     '<label class="field-label">نام برنامه<input class="text-input" data-program-field="name" maxlength="80" value="' + escapeHtml(program.name) + '"></label>' +
     '<label class="field-label">استراحت بین حرکت‌های برنامه <span>(ثانیه)</span><input class="number-input" data-program-field="restBetweenExercisesSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(program.restBetweenExercisesSeconds) + '"></label>' +
     '<p class="field-help">این استراحت بعد از حرکت تکی یا بعد از پایان یک بلوک سوپرست اعمال می‌شود.</p></section>' +
     (programDefinitions.length
-      ? '<div class="program-add-actions"><form class="add-movement-form" data-form="add-program-item"><select class="select-input" name="definition-id" required><option value="">انتخاب حرکت تعریف‌شده</option>' + options +
-        '</select><button class="primary-button" type="submit">افزودن حرکت</button></form><button class="secondary-button" type="button" data-action="open-program-superset">افزودن سوپرست</button></div>'
+      ? '<div class="program-add-actions"><button class="primary-button" type="button" data-action="open-program-movement-picker">افزودن حرکت</button></div>'
       : '<div class="empty-state"><strong>' + (state.definitions.length ? "سوپرست کامل نشده" : "اول حرکت‌ها را تعریف کن") + '</strong><p>' +
-        (state.definitions.length ? "برای افزودن سوپرست به برنامه، دست‌کم دو حرکت تکی داخل تعریف ترکیبی قرار بده." : "حرکت تکی یا سوپرست ترکیبی را در صفحهٔ تعریف حرکت بساز.") +
+        (state.definitions.length ? "برای افزودن سوپرست، در صفحهٔ حرکت‌ها دست‌کم دو حرکت تکی را داخل آن قرار بده." : "حرکت تکی یا سوپرست ترکیبی را در صفحهٔ تعریف حرکت بساز.") +
         '</p><a class="text-link" href="./exercises.html">رفتن به تعریف حرکت‌ها ←</a></div>') +
     '<div class="section-heading movement-section-heading"><div><p class="eyebrow">چیدمان تمرین</p><h2>حرکت‌های برنامه <span class="heading-count">' + number(program.items.length) + '</span></h2></div></div>' +
     (blocks.length ? '<div class="program-block-list">' + blockHtml + '</div>' :
@@ -632,49 +680,93 @@ function renderProgramPage() {
 }
 
 function renderDefinitionList() {
-  const selected = activeDefinitionId ? getDefinition(activeDefinitionId) : null;
-  const rows = state.definitions.map(function (definition, index) {
+  function rowsFor(definitions) {
+    return definitions.map(function (definition, index) {
     const meta = definition.type === "superset"
       ? "ترکیبی · " + number(definition.movements.length) + " حرکت"
       : "تکی · " + number(definition.primary.length) + " ماهیچهٔ اصلی · " + number(definition.secondary.length) + " فرعی";
-    return '<button class="exercise-row" type="button" data-action="open-definition" data-id="' + escapeHtml(definition.id) + '">' +
-      '<span class="exercise-number">' + number(index + 1) + '</span><span class="exercise-copy"><strong>' +
-      escapeHtml(definition.name) + '</strong><span class="exercise-meta">' + meta + '</span></span><span class="row-arrow" aria-hidden="true">‹</span></button>';
-  }).join("");
-  const editor = selected ? renderDefinitionEditor(selected) : "";
+    return '<article class="exercise-row"><span class="exercise-number">' + number(index + 1) +
+      '</span><span class="exercise-copy"><strong>' + escapeHtml(definition.name) + '</strong><span class="exercise-meta">' + meta + '</span></span>' +
+      '<div class="exercise-row-actions"><button class="small-action icon-action" type="button" data-action="edit-definition" data-id="' + escapeHtml(definition.id) + '" aria-label="ویرایش ' + escapeHtml(definition.name) + '" title="ویرایش">✎</button>' +
+      '<button class="small-action icon-action remove-action" type="button" data-action="delete-definition" data-id="' + escapeHtml(definition.id) + '" aria-label="حذف ' + escapeHtml(definition.name) + '" title="حذف">🗑</button></div></article>';
+    }).join("");
+  }
+  const singles = state.definitions.filter(function (definition) { return definition.type === "single"; });
+  const supersets = state.definitions.filter(function (definition) { return definition.type === "superset"; });
   return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido · کتابخانهٔ حرکت‌ها</p>' +
-    '<h1>تعریف حرکت</h1><p class="page-intro">حرکت تکی تعریف کن یا چند حرکت تکی را در یک سوپرست ترکیبی بچین.</p></header>' +
-    '<div class="definition-action-pair"><button class="primary-button" type="button" data-action="open-single-composer">افزودن حرکت</button>' +
+    '<h1>حرکت‌ها</h1><p class="page-intro">حرکت‌های تکی و سوپرست‌ها را جداگانه مدیریت کن.</p></header>' +
+    '<section class="definition-library-section"><div class="section-heading"><div><p class="eyebrow">حرکت عادی</p><h2>حرکت‌های تکی <span class="heading-count">' + number(singles.length) + '</span></h2></div>' +
+    '<button class="primary-button" type="button" data-action="open-single-composer">افزودن حرکت</button></div>' +
+    (singles.length ? '<div class="exercise-list">' + rowsFor(singles) + '</div>' : '<div class="empty-state compact-empty"><strong>حرکت تکی‌ای نیست</strong><p>با دکمهٔ افزودن حرکت، اولین حرکت را تعریف کن.</p></div>') + '</section>' +
+    '<section class="definition-library-section"><div class="section-heading"><div><p class="eyebrow">ترکیبی</p><h2>سوپرست‌ها <span class="heading-count">' + number(supersets.length) + '</span></h2></div>' +
     '<button class="secondary-button" type="button" data-action="open-superset-composer">افزودن سوپرست</button></div>' +
-    (selected ? editor : (state.definitions.length
-      ? '<div class="exercise-list">' + rows + '</div>'
-      : '<div class="empty-state"><strong>هنوز حرکتی تعریف نشده</strong><p>برای شروع، یکی از دکمه‌های افزودن حرکت یا افزودن سوپرست را بزن.</p></div>')) +
-    '</section>';
+    (supersets.length ? '<div class="exercise-list">' + rowsFor(supersets) + '</div>' : '<div class="empty-state compact-empty"><strong>سوپرستی تعریف نشده</strong><p>با دکمهٔ افزودن سوپرست، چند حرکت تکی را به ترتیب بچین.</p></div>') +
+    '</section></section>';
+}
+
+function renderProgramListPage() {
+  const cards = state.programs.map(function (program) {
+    const exerciseCount = program.items.length;
+    return '<article class="program-list-card"><div><p class="eyebrow">برنامهٔ تمرینی</p><h2>' + escapeHtml(program.name) + '</h2>' +
+      '<p class="field-help">' + number(exerciseCount) + ' حرکت · ' + number(program.restBetweenExercisesSeconds) + ' ثانیه استراحت بین حرکت‌ها</p></div>' +
+      '<a class="primary-button link-button" href="./index.html#program/' + encodeURIComponent(program.id) + '">نوشتن برنامه</a></article>';
+  }).join("");
+  return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p><h1>برنامه‌های من</h1>' +
+    '<p class="page-intro">برنامه‌ها را جدا نگه دار و هر کدام را مستقل ویرایش کن.</p></header>' +
+    '<div class="section-heading program-list-heading"><div><p class="eyebrow">کتابخانه</p><h2>فهرست برنامه‌ها <span class="heading-count">' + number(state.programs.length) + '</span></h2></div>' +
+    '<button class="primary-button" type="button" data-action="open-program-creator">افزودن برنامه</button></div>' +
+    (cards ? '<div class="program-list">' + cards + '</div>' : '<div class="empty-state"><strong>هنوز برنامه‌ای نساختی</strong><p>افزودن برنامه را بزن و نام و استراحت بین حرکت‌ها را وارد کن.</p></div>') + '</section>';
 }
 
 function renderComposerModal() {
   if (!composer) return "";
   if (composer.type === "single") {
     const definition = composer.definition;
+    const editing = Boolean(composer.editing);
     return '<div class="modal-backdrop" data-modal-backdrop><section class="composer-modal single-composer-modal" role="dialog" aria-modal="true" aria-labelledby="composer-title">' +
-      '<div class="modal-heading"><div><p class="eyebrow">حرکت تکی</p><h2 id="composer-title">ساخت حرکت</h2></div>' +
+      '<div class="modal-heading"><div><p class="eyebrow">حرکت تکی</p><h2 id="composer-title">' + (editing ? "ویرایش حرکت" : "افزودن حرکت") + '</h2></div>' +
       '<button class="small-action icon-action" type="button" data-action="close-composer" aria-label="بستن">×</button></div>' +
-      '<form class="single-composer-form" data-form="save-single-composer"><label class="field-label modal-name-field">نام حرکت<input class="text-input" data-single-draft-name maxlength="80" autocomplete="off" placeholder="مثلاً پرس سینه" required></label>' +
+      '<form class="single-composer-form" data-form="save-single-composer"><label class="field-label modal-name-field">نام حرکت<input class="text-input" data-single-draft-name maxlength="80" autocomplete="off" placeholder="مثلاً پرس سینه" value="' + escapeHtml(definition.name) + '" required></label>' +
       '<div class="muscle-editor">' + renderMuscleEditor(definition) + '</div>' +
       '<div class="modal-actions"><button class="small-action" type="button" data-action="close-composer">انصراف</button>' +
-      '<button class="primary-button" type="submit">ساخت حرکت</button></div></form></section></div>';
+      '<button class="primary-button" type="submit">' + (editing ? "ذخیره تغییرات" : "ساخت حرکت") + '</button></div></form></section></div>';
   }
   if (composer.type === "superset") {
     const definition = composer.definition;
+    const editing = Boolean(composer.editing);
     const generatedName = autoSupersetName(definition) || "نام سوپرست بر اساس حرکت‌های اول و دوم ساخته می‌شود";
     return '<div class="modal-backdrop" data-modal-backdrop><section class="composer-modal superset-composer-modal" role="dialog" aria-modal="true" aria-labelledby="composer-title">' +
-      '<div class="modal-heading"><div><p class="eyebrow">ترکیبی · سوپرست</p><h2 id="composer-title">ساخت سوپرست</h2></div>' +
+      '<div class="modal-heading"><div><p class="eyebrow">ترکیبی · سوپرست</p><h2 id="composer-title">' + (editing ? "ویرایش سوپرست" : "افزودن سوپرست") + '</h2></div>' +
       '<button class="small-action icon-action" type="button" data-action="close-composer" aria-label="بستن">×</button></div>' +
       '<p class="auto-superset-name" data-auto-superset-name>' + escapeHtml(generatedName) + '</p>' +
       renderSupersetDefinitionEditor(definition, true) +
       '<div class="modal-actions"><button class="small-action" type="button" data-action="close-composer">انصراف</button>' +
       '<button class="primary-button" type="button" data-action="save-superset-composer" ' + (definition.movements.length < 2 ? "disabled" : "") + '>' +
-      (composer.addToProgram ? "افزودن سوپرست به برنامه" : "ساخت سوپرست") + '</button></div></section></div>';
+      (editing ? "ذخیره تغییرات" : "ساخت سوپرست") + '</button></div></section></div>';
+  }
+  if (composer.type === "program-movement") {
+    const singles = state.definitions.filter(function (definition) { return definition.type === "single"; });
+    const supersets = state.definitions.filter(function (definition) { return definition.type === "superset" && definition.movements.length >= 2; });
+    const options = '<option value="">انتخاب حرکت</option>' +
+      (singles.length ? '<optgroup label="حرکت‌های تکی">' + singles.map(function (definition) {
+        return '<option value="' + escapeHtml(definition.id) + '">' + escapeHtml(definition.name) + '</option>';
+      }).join("") + '</optgroup>' : "") +
+      (supersets.length ? '<optgroup label="سوپرست‌ها">' + supersets.map(function (definition) {
+        return '<option value="' + escapeHtml(definition.id) + '">' + escapeHtml(definition.name) + '</option>';
+      }).join("") + '</optgroup>' : "");
+    return '<div class="modal-backdrop" data-modal-backdrop><section class="composer-modal program-picker-modal" role="dialog" aria-modal="true" aria-labelledby="composer-title">' +
+      '<div class="modal-heading"><div><p class="eyebrow">افزودن به برنامه</p><h2 id="composer-title">انتخاب حرکت</h2></div>' +
+      '<button class="small-action icon-action" type="button" data-action="close-composer" aria-label="بستن">×</button></div>' +
+      '<form class="program-picker-form" data-form="add-program-item"><label class="field-label">حرکت تعریف‌شده<select class="select-input" name="definition-id" required>' + options + '</select></label>' +
+      '<div class="modal-actions"><button class="small-action" type="button" data-action="close-composer">انصراف</button><button class="primary-button" type="submit">افزودن به برنامه</button></div></form></section></div>';
+  }
+  if (composer.type === "program-creator") {
+    return '<div class="modal-backdrop" data-modal-backdrop><section class="composer-modal program-creator-modal" role="dialog" aria-modal="true" aria-labelledby="composer-title">' +
+      '<div class="modal-heading"><div><p class="eyebrow">برنامهٔ تازه</p><h2 id="composer-title">افزودن برنامه</h2></div>' +
+      '<button class="small-action icon-action" type="button" data-action="close-composer" aria-label="بستن">×</button></div>' +
+      '<form class="program-creator-form" data-form="save-program"><label class="field-label">نام برنامه<input class="text-input" name="program-name" maxlength="80" autocomplete="off" placeholder="مثلاً تمرین بالاتنه" required></label>' +
+      '<label class="field-label">استراحت بین حرکت‌های برنامه <span>(ثانیه)</span><input class="number-input" name="program-rest" type="text" inputmode="numeric" autocomplete="off" value="۱۲۰"></label>' +
+      '<div class="modal-actions"><button class="small-action" type="button" data-action="close-composer">انصراف</button><button class="primary-button" type="submit">ساخت برنامه</button></div></form></section></div>';
   }
   return "";
 }
@@ -731,16 +823,12 @@ function renderSupersetDefinitionEditor(definition, inModal) {
   const movements = definition.movements.map(function (movement, index) {
     const child = getDefinition(movement.exerciseId);
     if (!child) return "";
-    const amount = movement.type === "reps"
-      ? '<label class="field-label">تکرار در هر ست<input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="reps" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.reps) + '"></label>'
-      : '<label class="field-label">زمان اجرای این حرکت <span>(ثانیه)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="durationSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.durationSeconds) + '"></label>';
     return '<article class="superset-definition-movement"><div class="superset-definition-movement-heading"><span class="pair-marker">حرکت ' + number(index + 1) + '</span>' +
       '<strong>' + escapeHtml(child.name) + '</strong><div class="member-actions">' +
       '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '" data-id="' + escapeHtml(movement.id) + '" data-direction="up" aria-label="جابجایی حرکت به بالا" ' + (index === 0 ? "disabled" : "") + '>↑</button>' +
       '<button class="small-action icon-action" type="button" data-action="move-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '" data-id="' + escapeHtml(movement.id) + '" data-direction="down" aria-label="جابجایی حرکت به پایین" ' + (index === definition.movements.length - 1 ? "disabled" : "") + '>↓</button></div>' +
       '<button class="small-action remove-action" type="button" data-action="remove-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '" data-id="' + escapeHtml(movement.id) + '">حذف</button></div>' +
-      '<div class="prescription-grid"><label class="field-label">نوع اجرا<select class="select-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="type">' +
-      '<option value="reps" ' + (movement.type === "reps" ? "selected" : "") + '>تکراری</option><option value="time" ' + (movement.type === "time" ? "selected" : "") + '>تایمی</option></select></label>' + amount +
+      '<div class="prescription-grid"><label class="field-label">تکرار در هر ست سوپرست<input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="reps" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(movement.reps) + '"></label>' +
       '<label class="field-label">وزنه <span>(کیلوگرم، اختیاری)</span><input class="number-input" data-superset-id="' + escapeHtml(definition.id) + '" data-superset-movement-id="' + escapeHtml(movement.id) + '" data-superset-movement-field="weightKg" type="text" inputmode="decimal" autocomplete="off" placeholder="وزن بدن" value="' + numberInput(movement.weightKg) + '"></label></div></article>' +
       (index < definition.movements.length - 1 && definition.restMode === "equal"
         ? '<div class="superset-rest-gap"><span>استراحت بین این دو حرکت</span><strong>' + number(definition.restBetweenMovementsSeconds) + ' ثانیه</strong></div>'
@@ -752,7 +840,7 @@ function renderSupersetDefinitionEditor(definition, inModal) {
     return '<button class="rest-mode-option ' + (definition.restMode === choice[0] ? "active" : "") + '" type="button" data-action="set-superset-rest-mode" data-superset-id="' + escapeHtml(definition.id) + '" data-mode="' + choice[0] + '" aria-pressed="' + String(definition.restMode === choice[0]) + '">' + choice[1] + '</button>';
   }).join("");
   return '<section class="superset-definition-builder ' + (inModal ? "is-modal-builder" : "") + '">' +
-    '<div class="map-instructions"><span class="instruction-icon">●</span><span>حرکت‌های تکی را به ترتیب اضافه کن و اجرای هر کدام را جدا تنظیم کن. نام سوپرست از دو حرکت اول ساخته می‌شود.</span></div>' +
+    '<div class="map-instructions"><span class="instruction-icon">●</span><span>هر حرکت فقط تکرار و وزنهٔ خودش را دارد؛ تعداد ست‌ها برای کل سوپرست تنظیم می‌شود. نام سوپرست از دو حرکت اول ساخته می‌شود.</span></div>' +
     (state.definitions.some(function (candidate) { return candidate.type === "single"; })
       ? '<form class="add-superset-movement-form" data-form="add-superset-definition-movement" data-superset-id="' + escapeHtml(definition.id) + '"><select class="select-input" name="exercise-id" aria-label="انتخاب حرکت تکی برای سوپرست" required><option value="">انتخاب حرکت تکی</option>' + options + '</select><button class="primary-button" type="submit">افزودن حرکت</button></form>'
       : '<div class="empty-state compact-empty"><strong>حرکت تکی‌ای برای افزودن نیست</strong><p>اول یک حرکت تکی تعریف کن، بعد آن را به سوپرست اضافه کن.</p>' +
@@ -768,17 +856,15 @@ function renderSupersetDefinitionEditor(definition, inModal) {
 
 function render() {
   document.body.classList.toggle("modal-open", Boolean(composer));
-  appRoot.innerHTML = (pageKind === "exercises" ? renderDefinitionList() : renderProgramPage()) + renderComposerModal();
-  document.title = pageKind === "exercises" ? "تعریف حرکت | hido" : state.program.name + " | hido";
-  if (pageKind === "exercises" && activeDefinitionId && getDefinition(activeDefinitionId) &&
-      getDefinition(activeDefinitionId).type === "single") {
-    attachBodyMap(activeDefinitionId);
-  }
+  appRoot.innerHTML = (pageKind === "exercises" ? renderDefinitionList() :
+    pageKind === "programs" ? renderProgramListPage() : renderProgramPage()) + renderComposerModal();
+  document.title = pageKind === "exercises" ? "حرکت‌ها | hido" :
+    pageKind === "programs" ? "برنامه‌های من | hido" : (state.program ? state.program.name : "نوشتن برنامه") + " | hido";
   if (composer && composer.type === "single") attachBodyMap(composer.definition.id);
 }
 
 function persistEditedDefinition(definition) {
-  if (getDefinition(definition.id)) saveData();
+  if (getDefinition(definition.id) && !(composer && composer.editing)) saveData();
   render();
 }
 
@@ -787,7 +873,7 @@ function addSupersetDefinitionMovement(form) {
   const exerciseId = form.elements.namedItem("exercise-id").value;
   const child = getDefinition(exerciseId);
   if (!definition || definition.type !== "superset" || !child || child.type !== "single") return;
-  definition.movements.push({ id: createId(), exerciseId: child.id, type: "reps", reps: 10, durationSeconds: 30, weightKg: "", restAfterSeconds: definition.restBetweenMovementsSeconds });
+  definition.movements.push({ id: createId(), exerciseId: child.id, type: "reps", reps: 10, weightKg: "", restAfterSeconds: definition.restBetweenMovementsSeconds });
   definition.name = autoSupersetName(definition) || definition.name;
   persistEditedDefinition(definition);
 }
@@ -834,9 +920,7 @@ function updateSupersetDefinitionMovementField(input) {
   });
   if (!movement) return;
   const field = input.dataset.supersetMovementField;
-  if (field === "type") movement.type = input.value === "time" ? "time" : "reps";
   if (field === "reps") movement.reps = boundedInt(input.value, movement.reps, 1, 1000);
-  if (field === "durationSeconds") movement.durationSeconds = boundedInt(input.value, movement.durationSeconds, 1, 10800);
   if (field === "weightKg") movement.weightKg = cleanWeight(input.value);
   if (field === "restAfterSeconds") movement.restAfterSeconds = boundedInt(input.value, movement.restAfterSeconds, 0, 3600);
   persistEditedDefinition(definition);
@@ -854,7 +938,7 @@ function setSupersetRestMode(definitionId, mode) {
   persistEditedDefinition(definition);
 }
 
-function addSingleComposer() {
+function saveSingleComposer() {
   const nameField = appRoot.querySelector("[data-single-draft-name]");
   const name = nameField ? nameField.value.trim() : "";
   if (!name) {
@@ -864,9 +948,18 @@ function addSingleComposer() {
   const definition = composer && composer.definition;
   if (!definition || definition.type !== "single") return;
   definition.name = name;
-  state.definitions.push(definition);
+  const existingIndex = state.definitions.findIndex(function (item) { return item.id === definition.id; });
+  const previous = existingIndex >= 0 ? state.definitions[existingIndex] : null;
+  if (existingIndex >= 0) state.definitions[existingIndex] = definition;
+  else state.definitions.push(definition);
+  state.definitions.forEach(function (candidate) {
+    if (candidate.type === "superset" && candidate.movements.some(function (movement) { return movement.exerciseId === definition.id; })) {
+      candidate.name = autoSupersetName(candidate) || "سوپرست ناتمام";
+    }
+  });
   if (!saveData()) {
-    state.definitions = state.definitions.filter(function (item) { return item.id !== definition.id; });
+    if (previous) state.definitions[existingIndex] = previous;
+    else state.definitions = state.definitions.filter(function (item) { return item.id !== definition.id; });
     return;
   }
   composer = null;
@@ -875,18 +968,20 @@ function addSingleComposer() {
 }
 
 
-function addSupersetComposer() {
+function saveSupersetComposer() {
   const definition = composer && composer.definition;
   if (!definition || definition.type !== "superset" || definition.movements.length < 2) {
     window.alert("برای ساخت سوپرست دست‌کم دو حرکت لازم است.");
     return;
   }
   definition.name = autoSupersetName(definition);
-  state.definitions.push(definition);
-  if (composer.addToProgram) state.program.items.push(createProgramItem(definition.id));
+  const existingIndex = state.definitions.findIndex(function (item) { return item.id === definition.id; });
+  const previous = existingIndex >= 0 ? state.definitions[existingIndex] : null;
+  if (existingIndex >= 0) state.definitions[existingIndex] = definition;
+  else state.definitions.push(definition);
   if (!saveData()) {
-    state.definitions = state.definitions.filter(function (item) { return item.id !== definition.id; });
-    state.program.items = state.program.items.filter(function (item) { return item.exerciseId !== definition.id; });
+    if (previous) state.definitions[existingIndex] = previous;
+    else state.definitions = state.definitions.filter(function (item) { return item.id !== definition.id; });
     return;
   }
   composer = null;
@@ -894,26 +989,33 @@ function addSupersetComposer() {
   render();
 }
 
-function openComposer(type, addToProgram) {
+function openComposer(type, definitionId) {
   composerReturnAction = document.activeElement && document.activeElement.dataset
     ? document.activeElement.dataset.action || null
     : null;
   composerPreviousMuscleRole = activeMuscleRole;
   activeMuscleRole = "primary";
+  const original = definitionId ? getDefinition(definitionId) : null;
   if (type === "single") {
-    composer = { type: "single", definition: { id: createId(), name: "", type: "single", primary: [], secondary: [] } };
-  } else {
+    composer = { type: "single", definition: original ? JSON.parse(JSON.stringify(original)) : { id: createId(), name: "", type: "single", primary: [], secondary: [] }, editing: Boolean(original) };
+  } else if (type === "superset") {
     composer = {
       type: "superset",
-      addToProgram: Boolean(addToProgram),
-      definition: {
+      editing: Boolean(original),
+      definition: original ? JSON.parse(JSON.stringify(original)) : {
         id: createId(), name: "", type: "superset", primary: [], secondary: [], movements: [], rounds: 3,
         restMode: "none", restBetweenMovementsSeconds: 0, restBetweenRoundsSeconds: 90
       }
     };
+  } else if (type === "program-movement") {
+    composer = { type: "program-movement" };
+  } else if (type === "program-creator") {
+    composer = { type: "program-creator" };
   }
   render();
-  const target = composer.type === "single" ? appRoot.querySelector("[data-single-draft-name]") : appRoot.querySelector(".add-superset-movement-form select");
+  const target = composer.type === "single" ? appRoot.querySelector("[data-single-draft-name]") :
+    composer.type === "superset" ? appRoot.querySelector(".add-superset-movement-form select") :
+      composer.type === "program-movement" ? appRoot.querySelector("[name='definition-id']") : appRoot.querySelector("[name='program-name']");
   if (target) target.focus();
 }
 
@@ -928,16 +1030,23 @@ function closeComposer() {
 }
 
 function createProgramItem(definitionId) {
-  return {
+  const definition = getDefinition(definitionId);
+  const item = {
     id: createId(),
-    exerciseId: definitionId,
+    exerciseId: definitionId
+  };
+  if (definition && definition.type === "superset") {
+    item.type = "superset";
+    return item;
+  }
+  return Object.assign(item, {
     type: "reps",
     sets: 3,
     reps: 10,
     durationSeconds: 30,
     weightKg: "",
     restBetweenSetsSeconds: 90
-  };
+  });
 }
 
 function addProgramItem(form) {
@@ -945,7 +1054,32 @@ function addProgramItem(form) {
   if (!getDefinition(definitionId)) return;
   state.program.items.push(createProgramItem(definitionId));
   saveData();
+  composer = null;
   render();
+}
+
+function saveProgram(form) {
+  const name = form.elements.namedItem("program-name").value.trim();
+  if (!name) return;
+  const program = {
+    id: createId(),
+    name: name,
+    restBetweenExercisesSeconds: boundedInt(form.elements.namedItem("program-rest").value, 120, 0, 3600),
+    items: []
+  };
+  const previousProgram = state.program;
+  const previousProgramId = state.activeProgramId;
+  state.programs.push(program);
+  state.program = program;
+  state.activeProgramId = program.id;
+  if (!saveData()) {
+    state.programs = state.programs.filter(function (candidate) { return candidate.id !== program.id; });
+    state.program = previousProgram;
+    state.activeProgramId = previousProgramId;
+    return;
+  }
+  composer = null;
+  window.location.href = "./index.html#program/" + encodeURIComponent(program.id);
 }
 
 function reorderBlock(blockId, direction) {
@@ -971,7 +1105,7 @@ function removeProgramItem(itemId) {
 
 function deleteDefinition(id) {
   const definition = getDefinition(id);
-  if (!definition || !window.confirm("حرکت «" + definition.name + "» و ردیف‌هایش از برنامه حذف شود؟")) return;
+  if (!definition || !window.confirm("حرکت «" + definition.name + "» و ردیف‌های مرتبط از همهٔ برنامه‌ها حذف شود؟")) return;
   state.definitions = state.definitions.filter(function (item) { return item.id !== id; });
   state.definitions.forEach(function (item) {
     if (item.type === "superset") {
@@ -979,7 +1113,17 @@ function deleteDefinition(id) {
       item.name = autoSupersetName(item) || "سوپرست ناتمام";
     }
   });
-  state.program.items = state.program.items.filter(function (item) { return item.exerciseId !== id; });
+  state.programs.forEach(function (program) {
+    program.items = program.items.filter(function (item) {
+      if (item.exerciseId === id) return false;
+      const referenced = state.definitions.find(function (candidate) { return candidate.id === item.exerciseId; });
+      return !(referenced && referenced.type === "superset" && referenced.movements.length < 2);
+    });
+  });
+  if (state.program) {
+    const active = state.programs.find(function (program) { return program.id === state.program.id; });
+    state.program = active || null;
+  }
   saveData();
   activeDefinitionId = null;
   window.history.replaceState({}, "", "./exercises.html");
@@ -1132,7 +1276,7 @@ function toggleMuscle(group, definitionId) {
     definition[opposite] = definition[opposite].filter(function (value) { return value !== group; });
     selected.push(group);
   }
-  if (getDefinition(definition.id)) saveData();
+  if (getDefinition(definition.id) && !(composer && composer.editing)) saveData();
   updateMuscleSelection(definition.id);
   const targetEditor = Array.from(appRoot.querySelectorAll(".muscle-editor")).find(function (candidate) {
     const host = candidate.querySelector(".body-map[data-body-map-for]");
@@ -1161,8 +1305,9 @@ appRoot.addEventListener("submit", function (event) {
   const form = event.target.closest("form[data-form]");
   if (!form) return;
   event.preventDefault();
-  if (form.dataset.form === "save-single-composer") addSingleComposer();
+  if (form.dataset.form === "save-single-composer") saveSingleComposer();
   if (form.dataset.form === "add-program-item") addProgramItem(form);
+  if (form.dataset.form === "save-program") saveProgram(form);
   if (form.dataset.form === "add-superset-definition-movement") addSupersetDefinitionMovement(form);
 });
 
@@ -1202,12 +1347,16 @@ appRoot.addEventListener("click", function (event) {
   }
   const button = event.target.closest("[data-action]");
   if (!button || button.disabled) return;
-  if (button.dataset.action === "open-definition") selectDefinition(button.dataset.id);
   if (button.dataset.action === "open-single-composer") openComposer("single", false);
   if (button.dataset.action === "open-superset-composer") openComposer("superset", false);
-  if (button.dataset.action === "open-program-superset") openComposer("superset", true);
+  if (button.dataset.action === "open-program-movement-picker") openComposer("program-movement");
+  if (button.dataset.action === "open-program-creator") openComposer("program-creator");
+  if (button.dataset.action === "edit-definition") {
+    const definition = state.definitions.find(function (candidate) { return candidate.id === button.dataset.id; });
+    if (definition) openComposer(definition.type, definition.id);
+  }
   if (button.dataset.action === "close-composer") closeComposer();
-  if (button.dataset.action === "save-superset-composer") addSupersetComposer();
+  if (button.dataset.action === "save-superset-composer") saveSupersetComposer();
   if (button.dataset.action === "back-to-library") {
     activeDefinitionId = null;
     window.history.replaceState({}, "", "./exercises.html");
@@ -1241,7 +1390,13 @@ appRoot.addEventListener("keydown", function (event) {
 
 window.addEventListener("popstate", function () {
   activeDefinitionId = readDefinitionId();
+  activeProgramId = readProgramId() || state.activeProgramId;
+  if (activeProgramId) {
+    const selected = state.programs.find(function (program) { return program.id === activeProgramId; });
+    if (selected) state.program = selected;
+  }
   activeMuscleRole = "primary";
+  composer = null;
   render();
 });
 
