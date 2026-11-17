@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#17261e">
+  <meta name="description" content="نمایش برنامه‌های تمرینی مربیان در hido-show">
+  <title>hido-show | نمایش برنامه</title>
+  <link rel="manifest" href="./hido-show.webmanifest">
+  <link rel="icon" href="./assets/icons/hido.svg" type="image/svg+xml">
+  <link rel="preload" href="./assets/fonts/Vazirmatn-VF.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="show">
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./hido-show.html" aria-label="خانهٔ hido-show"><span class="brand-mark">h</span><span>hido-show</span></a>
+      <div class="topbar-tools">
+        <a class="small-action" href="./programs.html">hido-co · صفحهٔ مربی</a>
+        <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="تغییر به حالت تیره" title="تغییر به حالت تیره">☾</button>
+      </div>
+    </header>
+    <main class="app-main" id="show-app" aria-live="polite">
+      <p class="loading-message">در حال بارگذاری…</p>
+    </main>
+    <footer class="app-footer"><span>این صفحه فقط برای نمایش برنامه است؛ برای تغییرات با مربی هماهنگ کن.</span><span id="show-offline-status" role="status">آماده‌سازی آفلاین…</span></footer>
+  </div>
+  <script src="./show.js" defer></script>
+</body>
+</html>

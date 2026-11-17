@@ -622,7 +622,7 @@ async function exportProgram() {
   const content = state.program.items.map(renderExportProgramItem).join("");
   const html = '<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"><title>' +
-    escapeHtml(state.program.name) + " | hido</title><style>" + embeddedFont +
+    escapeHtml(state.program.name) + " | hido-co</title><style>" + embeddedFont +
     'body{margin:0;background:#f4f5ef;color:#17261e;font-family:Vazirmatn,Tahoma,sans-serif;font-size:17px;line-height:1.9;font-feature-settings:"ss01"}' +
     '.sheet{max-width:760px;margin:30px auto;padding:28px;background:white;border-radius:20px;box-shadow:0 12px 36px #17261e18}' +
     'h1{margin:0 0 8px;font-size:28px}.subtitle{color:#667269;margin:0 0 22px}.program-item{padding:16px 0;border-top:1px solid #e5e8df}' +
@@ -632,14 +632,87 @@ async function exportProgram() {
     '.license{margin-top:20px;color:#667269;font-size:12px}.license pre{overflow:auto;white-space:pre-wrap;direction:ltr;text-align:left;font:11px monospace}' +
     '@media print{body{background:white}.toolbar{display:none}.sheet{margin:0 auto;padding:0;box-shadow:none}.program-item{break-inside:avoid}}' +
     '</style></head><body><div class="toolbar"><button type="button" onclick="window.print()">چاپ / ذخیره به صورت PDF</button></div>' +
-    '<main class="sheet"><h1>' + escapeHtml(state.program.name) + '</h1><p class="subtitle">برنامهٔ تمرینی ساخته‌شده با hido</p>' +
+    '<main class="sheet"><h1>' + escapeHtml(state.program.name) + '</h1><p class="subtitle">برنامهٔ تمرینی ساخته‌شده با hido-co</p>' +
     content + licenseSection + "</main></body></html>";
 
   const filename = (state.program.name || "hido").replace(/[\\/:*?"<>|]+/g, "-").trim().slice(0, 70) || "hido";
   const fileUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = fileUrl;
-  link.download = "hido-" + filename + ".html";
+  link.download = "hido-co-" + filename + ".html";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(function () { URL.revokeObjectURL(fileUrl); }, 1000);
+}
+
+function buildProgramJson(program) {
+  return {
+    format: "hido-program",
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    program: {
+      name: program.name,
+      restBetweenExercisesSeconds: program.restBetweenExercisesSeconds,
+      items: program.items.map(function (item) {
+        const definition = getDefinition(item.exerciseId);
+        if (!definition) return null;
+        const primaryMuscles = definition.type === "single"
+          ? definition.primary.map(function (group) { return MUSCLE_NAMES[group] || group; })
+          : [];
+        const secondaryMuscles = definition.type === "single"
+          ? definition.secondary.map(function (group) { return MUSCLE_NAMES[group] || group; })
+          : [];
+        if (definition.type === "superset") {
+          return {
+            type: "superset",
+            name: definition.name,
+            rounds: definition.rounds,
+            restBetweenRoundsSeconds: definition.restBetweenRoundsSeconds,
+            restMode: definition.restMode,
+            restBetweenMovementsSeconds: definition.restBetweenMovementsSeconds,
+            movements: definition.movements.map(function (movement) {
+              const child = getDefinition(movement.exerciseId);
+              if (!child) return null;
+              return {
+                name: child.name,
+                reps: movement.reps,
+                weightKg: movement.weightKg,
+                restAfterSeconds: movement.restAfterSeconds,
+                primaryMuscles: child.primary.map(function (group) { return MUSCLE_NAMES[group] || group; }),
+                secondaryMuscles: child.secondary.map(function (group) { return MUSCLE_NAMES[group] || group; })
+              };
+            }).filter(Boolean)
+          };
+        }
+        return {
+          type: "single",
+          name: definition.name,
+          executionType: item.type,
+          sets: item.sets,
+          reps: item.reps,
+          durationSeconds: item.durationSeconds,
+          weightKg: item.weightKg,
+          restBetweenSetsSeconds: item.restBetweenSetsSeconds,
+          primaryMuscles: primaryMuscles,
+          secondaryMuscles: secondaryMuscles
+        };
+      }).filter(Boolean)
+    }
+  };
+}
+
+function exportProgramJson(programId) {
+  const program = programId
+    ? state.programs.find(function (candidate) { return candidate.id === programId; })
+    : state.program;
+  if (!program) return;
+  const json = JSON.stringify(buildProgramJson(program), null, 2);
+  const filename = (program.name || "program").replace(/[\\/:*?"<>|]+/g, "-").trim().slice(0, 70) || "program";
+  const fileUrl = URL.createObjectURL(new Blob([json], { type: "application/json;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = fileUrl;
+  link.download = "hido-co-" + filename + ".json";
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -649,7 +722,7 @@ async function exportProgram() {
 function renderProgramPage() {
   const program = state.program;
   if (!program) {
-    return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p>' +
+    return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido-co · برنامه‌ساز</p>' +
       '<h1>نوشتن برنامه</h1><p class="page-intro">برای شروع، از فهرست برنامه‌ها یک برنامه بساز یا انتخاب کن.</p></header>' +
       '<div class="empty-state"><strong>برنامه‌ای انتخاب نشده</strong><p>فهرست برنامه‌ها را باز کن و برنامهٔ تازه بساز.</p>' +
       '<a class="primary-button link-button" href="./programs.html">رفتن به فهرست برنامه‌ها</a></div></section>';
@@ -661,9 +734,9 @@ function renderProgramPage() {
   const programDefinitions = state.definitions.filter(function (definition) {
     return definition.type === "single" || definition.movements.length >= 2;
   });
-  return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p>' +
+  return '<section class="page program-page"><header class="page-heading"><p class="eyebrow">hido-co · مربی</p>' +
     '<h1>نوشتن برنامه</h1><p class="page-intro">حرکت تکی یا سوپرست را به برنامه اضافه کن و ترتیب بلوک‌ها را بچین.</p>' +
-    '<div class="heading-actions"><a class="small-action" href="./programs.html">فهرست برنامه‌ها</a><button class="export-button" type="button" data-action="export-program">دریافت خروجی آفلاین</button></div></header>' +
+    '<div class="heading-actions"><a class="small-action" href="./programs.html">فهرست برنامه‌ها</a><button class="export-button" type="button" data-action="export-program-json">دریافت JSON</button><button class="small-action" type="button" data-action="export-program">خروجی HTML آفلاین</button></div></header>' +
     '<section class="plan-settings"><div class="section-heading"><div><p class="eyebrow">تنظیم برنامه</p><h2>نام و استراحت برنامه</h2></div></div>' +
     '<label class="field-label">نام برنامه<input class="text-input" data-program-field="name" maxlength="80" value="' + escapeHtml(program.name) + '"></label>' +
     '<label class="field-label">استراحت بین حرکت‌های برنامه <span>(ثانیه)</span><input class="number-input" data-program-field="restBetweenExercisesSeconds" type="text" inputmode="numeric" autocomplete="off" value="' + numberInput(program.restBetweenExercisesSeconds) + '"></label>' +
@@ -693,7 +766,7 @@ function renderDefinitionList() {
   }
   const singles = state.definitions.filter(function (definition) { return definition.type === "single"; });
   const supersets = state.definitions.filter(function (definition) { return definition.type === "superset"; });
-  return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido · کتابخانهٔ حرکت‌ها</p>' +
+  return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido-co · کتابخانهٔ حرکت‌ها</p>' +
     '<h1>حرکت‌ها</h1><p class="page-intro">حرکت‌های تکی و سوپرست‌ها را جداگانه مدیریت کن.</p></header>' +
     '<section class="definition-library-section"><div class="section-heading"><div><p class="eyebrow">حرکت عادی</p><h2>حرکت‌های تکی <span class="heading-count">' + number(singles.length) + '</span></h2></div>' +
     '<button class="primary-button" type="button" data-action="open-single-composer">افزودن حرکت</button></div>' +
@@ -709,10 +782,11 @@ function renderProgramListPage() {
     const exerciseCount = program.items.length;
     return '<article class="program-list-card"><div><p class="eyebrow">برنامهٔ تمرینی</p><h2>' + escapeHtml(program.name) + '</h2>' +
       '<p class="field-help">' + number(exerciseCount) + ' حرکت · ' + number(program.restBetweenExercisesSeconds) + ' ثانیه استراحت بین حرکت‌ها</p></div>' +
-      '<a class="primary-button link-button" href="./index.html#program/' + encodeURIComponent(program.id) + '">نوشتن برنامه</a></article>';
+      '<div class="program-card-actions"><button class="secondary-button" type="button" data-action="export-program-json" data-program-id="' + escapeHtml(program.id) + '">دریافت JSON</button>' +
+      '<a class="primary-button link-button" href="./index.html#program/' + encodeURIComponent(program.id) + '">نوشتن برنامه</a></div></article>';
   }).join("");
-  return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido · برنامه‌ساز</p><h1>برنامه‌های من</h1>' +
-    '<p class="page-intro">برنامه‌ها را جدا نگه دار و هر کدام را مستقل ویرایش کن.</p></header>' +
+  return '<section class="page library-page"><header class="page-heading"><p class="eyebrow">hido-co · مربی</p><h1>برنامه‌های من</h1>' +
+    '<p class="page-intro">برنامه‌ها را جدا نگه دار و هر کدام را مستقل ویرایش کن. خروجی JSON را برای ورزشکاران بفرست تا در hido-show ببینند.</p></header>' +
     '<div class="section-heading program-list-heading"><div><p class="eyebrow">کتابخانه</p><h2>فهرست برنامه‌ها <span class="heading-count">' + number(state.programs.length) + '</span></h2></div>' +
     '<button class="primary-button" type="button" data-action="open-program-creator">افزودن برنامه</button></div>' +
     (cards ? '<div class="program-list">' + cards + '</div>' : '<div class="empty-state"><strong>هنوز برنامه‌ای نساختی</strong><p>افزودن برنامه را بزن و نام و استراحت بین حرکت‌ها را وارد کن.</p></div>') + '</section>';
@@ -858,8 +932,8 @@ function render() {
   document.body.classList.toggle("modal-open", Boolean(composer));
   appRoot.innerHTML = (pageKind === "exercises" ? renderDefinitionList() :
     pageKind === "programs" ? renderProgramListPage() : renderProgramPage()) + renderComposerModal();
-  document.title = pageKind === "exercises" ? "حرکت‌ها | hido" :
-    pageKind === "programs" ? "برنامه‌های من | hido" : (state.program ? state.program.name : "نوشتن برنامه") + " | hido";
+  document.title = pageKind === "exercises" ? "حرکت‌ها | hido-co" :
+    pageKind === "programs" ? "برنامه‌های من | hido-co" : (state.program ? state.program.name : "نوشتن برنامه") + " | hido-co";
   if (composer && composer.type === "single") attachBodyMap(composer.definition.id);
 }
 
@@ -1365,6 +1439,7 @@ appRoot.addEventListener("click", function (event) {
   if (button.dataset.action === "delete-definition") deleteDefinition(button.dataset.id);
   if (button.dataset.action === "toggle-muscle") toggleMuscle(button.dataset.muscle, button.dataset.definitionId);
   if (button.dataset.action === "export-program") exportProgram();
+  if (button.dataset.action === "export-program-json") exportProgramJson(button.dataset.programId);
   if (button.dataset.action === "select-muscle-role") {
     activeMuscleRole = button.dataset.role === "secondary" ? "secondary" : "primary";
     updateMuscleSelection(button.dataset.definitionId);
@@ -1426,7 +1501,7 @@ if ("serviceWorker" in navigator) {
         return navigator.serviceWorker.ready;
       })
       .then(function () {
-        if (offlineStatus) offlineStatus.textContent = "hido برای استفادهٔ آفلاین آماده است.";
+        if (offlineStatus) offlineStatus.textContent = "hido-co برای استفادهٔ آفلاین آماده است.";
       })
       .catch(function () {
         if (offlineStatus) offlineStatus.textContent = "برای آماده‌سازی آفلاین، یک‌بار به اینترنت وصل شو.";

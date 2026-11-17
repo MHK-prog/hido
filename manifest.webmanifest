@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "hido",
-  "short_name": "hido",
-  "description": "ساخت و مدیریت برنامه‌های تمرینی",
+  "name": "hido-co",
+  "short_name": "hido-co",
+  "description": "ساخت و خروجی JSON برنامه‌های تمرینی مربیان",
   "lang": "fa",
   "dir": "rtl",
   "start_url": "./programs.html",

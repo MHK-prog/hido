@@ -1,7 +1,7 @@
 "use strict";
 
 // Increase APP_VERSION whenever an application-shell file changes.
-const APP_VERSION = "13";
+const APP_VERSION = "14";
 const CACHE_PREFIX = "hido-app-shell-v";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const APP_SHELL = [
@@ -9,9 +9,12 @@ const APP_SHELL = [
   "./index.html",
   "./programs.html",
   "./exercises.html",
+  "./hido-show.html",
   "./styles.css",
   "./app.js",
+  "./show.js",
   "./manifest.webmanifest",
+  "./hido-show.webmanifest",
   "./full_body.svg",
   "./assets/fonts/Vazirmatn-VF.woff2",
   "./assets/fonts/OFL.txt",
