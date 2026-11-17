@@ -319,11 +319,21 @@ h2 { margin-bottom: 0; font-size: 18px; }
 .page-heading { display: grid; gap: 6px; }
 .heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .export-button { min-height: 45px; padding: 0 16px; border: 0; border-radius: 13px; background: var(--ink); color: var(--paper); font-weight: 800; }
-.show-import-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 9px; margin: 0 0 16px; padding: 10px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: var(--shadow); }
-.show-import-form .field-label { min-width: 0; }
-.file-input { display: block; width: 100%; min-width: 0; min-height: 44px; margin-top: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 11px; background: var(--input-surface); color: var(--ink); font-size: 13px; }
-.file-input::file-selector-button { min-height: 32px; margin-inline-end: 7px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--soft-green); color: var(--ink); font: inherit; font-weight: 800; }
-.show-feedback { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--single-card-line); border-radius: 12px; background: var(--single-card); color: var(--ink); font-size: 14px; }
+.show-import-form { display: grid; gap: 11px; margin: 0 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: var(--shadow); }
+.file-dropzone { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 86px; padding: 12px; border: 2px dashed #cbd6c1; border-radius: 14px; background: var(--input-surface); color: var(--ink); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.file-input { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.file-dropzone:focus-within, .file-dropzone.is-dragging, .file-dropzone.has-file { border-color: var(--accent-dark); background: var(--soft-green); }
+.file-picker-icon { display: grid; flex: 0 0 44px; width: 44px; height: 44px; place-items: center; border-radius: 13px; background: var(--soft-green); color: var(--accent-dark); font-size: 25px; font-weight: 900; }
+.file-picker-copy { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.file-picker-copy strong { font-size: 14px; }
+.file-picker-copy small { overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
+.file-picker-action { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 38px; padding: 0 11px; border-radius: 10px; background: var(--ink); color: var(--paper); font-size: 12px; font-weight: 800; }
+.file-picker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.file-picker-actions > * { flex: 1; }
+.file-picker-actions .primary-button:disabled { opacity: .48; }
+.show-feedback { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--single-card-line); border-radius: 12px; background: var(--single-card); color: var(--ink); font-size: 14px; line-height: 1.8; }
+.show-feedback.is-warning { border-color: var(--warm-line); background: var(--warm-surface); color: var(--warm-ink); }
+.show-feedback.is-error { border-color: var(--danger-line); background: var(--danger-surface); color: var(--danger-ink); }
 .viewer-empty { margin-bottom: 16px; }
 .viewer-prescription { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
 .viewer-prescription > span { display: inline-flex; align-items: center; min-height: 34px; padding: 5px 9px; border: 1px solid var(--single-card-line); border-radius: 9px; background: var(--single-card); color: var(--ink); font-size: 13px; font-weight: 800; }
@@ -340,6 +350,19 @@ h2 { margin-bottom: 0; font-size: 18px; }
 .viewer-superset-movement > small { color: var(--muted); font-size: 12px; }
 .viewer-gap { margin: 3px 25px 4px 0; padding: 4px 8px; border-inline-start: 2px solid var(--warm-line); color: var(--warm-ink); font-size: 12px; }
 .show-attribution { margin: 16px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+.exercise-type-choices { display: grid; gap: 11px; }
+.exercise-type-choice { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 13px; border: 1px solid var(--single-card-line); border-radius: 16px; background: var(--single-card); color: var(--ink); text-decoration: none; }
+.exercise-type-choice.is-superset { border-color: var(--superset-card-line); background: var(--superset-card); }
+.exercise-type-icon { display: grid; flex: 0 0 43px; width: 43px; height: 43px; place-items: center; border-radius: 13px; background: var(--surface); color: var(--accent-dark); font-size: 23px; font-weight: 900; }
+.exercise-type-choice.is-superset .exercise-type-icon { color: var(--warm-ink); }
+.exercise-type-choice > span:nth-child(2) { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.exercise-type-choice strong { font-size: 16px; }
+.exercise-type-choice small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.exercise-editor-panel { display: grid; gap: 13px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: var(--shadow); }
+.exercise-editor-panel.single-composer-form { padding-bottom: 130px; }
+.exercise-editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.exercise-editor-actions > * { flex: 1; }
+.program-create-form .primary-button { width: 100%; margin-top: 5px; }
 .muscle-picker { margin: 15px 0 4px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .muscle-picker h3 { margin: 0 0 5px; font-size: 17px; }
 .muscle-picker > .field-help { margin-bottom: 10px; }
@@ -413,11 +436,19 @@ h2 { margin-bottom: 0; font-size: 18px; }
 :root[data-theme="dark"] .program-block.is-single { border-color: var(--single-card-line); background: var(--single-card); }
 :root[data-theme="dark"] .program-block.is-superset .program-movement { border-color: var(--superset-card-line); background: rgba(16,23,19,.34); }
 :root[data-theme="dark"] .program-block.is-single .program-movement { border-color: var(--single-card-line); background: rgba(16,23,19,.34); }
-:root[data-theme="dark"] .file-input { border-color: var(--line); background: var(--input-surface); color: var(--ink); }
-:root[data-theme="dark"] .file-input::file-selector-button { background: var(--soft-green); color: var(--ink); }
+:root[data-theme="dark"] .file-dropzone { border-color: var(--line); background: var(--input-surface); color: var(--ink); }
+:root[data-theme="dark"] .file-dropzone:focus-within,
+:root[data-theme="dark"] .file-dropzone.is-dragging,
+:root[data-theme="dark"] .file-dropzone.has-file { border-color: var(--accent-dark); background: var(--soft-green); }
+:root[data-theme="dark"] .file-picker-action { background: var(--accent); color: #142019; }
 :root[data-theme="dark"] .viewer-prescription > span,
-:root[data-theme="dark"] .show-feedback { border-color: var(--single-card-line); background: var(--single-card); color: var(--ink); }
+:root[data-theme="dark"] .show-feedback.is-success { border-color: var(--single-card-line); background: var(--single-card); color: var(--ink); }
+:root[data-theme="dark"] .show-feedback.is-warning { border-color: var(--warm-line); background: var(--warm-surface); color: var(--warm-ink); }
+:root[data-theme="dark"] .show-feedback.is-error { border-color: var(--danger-line); background: var(--danger-surface); color: var(--danger-ink); }
 :root[data-theme="dark"] .viewer-superset-movement { border-color: var(--warm-line); background: var(--warm-surface); }
+:root[data-theme="dark"] .exercise-editor-panel,
+:root[data-theme="dark"] .exercise-type-choice { border-color: var(--line); background: var(--surface); }
+:root[data-theme="dark"] .exercise-type-choice.is-superset { border-color: var(--superset-card-line); background: var(--superset-card); }
 :root[data-theme="dark"] .text-input,
 :root[data-theme="dark"] .number-input,
 :root[data-theme="dark"] .select-input,

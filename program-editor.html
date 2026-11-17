@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#17261e">
+  <meta name="description" content="افزودن و ویرایش برنامه‌های تمرینی در hido-co">
+  <title>افزودن برنامه | hido-co</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icons/hido.svg" type="image/svg+xml">
+  <link rel="preload" href="./assets/fonts/Vazirmatn-VF.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="program">
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./programs.html" aria-label="خانهٔ hido-co"><span class="brand-mark">h</span><span>hido-co</span></a>
+      <div class="topbar-tools">
+        <nav class="page-nav" aria-label="فهرست‌های hido-co">
+          <a href="./programs.html">فهرست برنامه‌ها</a>
+          <a href="./exercises.html">فهرست حرکت‌ها</a>
+        </nav>
+        <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="تغییر به حالت تیره" title="تغییر به حالت تیره">☾</button>
+      </div>
+    </header>
+    <main class="app-main" id="app" aria-live="polite">
+      <p class="loading-message">در حال بارگذاری…</p>
+    </main>
+    <footer class="app-footer"><span>اطلاعات برنامه و حرکت‌ها در همین مرورگر ذخیره می‌شود.</span><span id="offline-status" role="status">آماده‌سازی آفلاین…</span></footer>
+  </div>
+  <script src="./app.js" defer></script>
+</body>
+</html>

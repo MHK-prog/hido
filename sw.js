@@ -1,14 +1,14 @@
 "use strict";
 
 // Increase APP_VERSION whenever an application-shell file changes.
-const APP_VERSION = "14";
+const APP_VERSION = "15";
 const CACHE_PREFIX = "hido-app-shell-v";
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const APP_SHELL = [
-  "./",
-  "./index.html",
   "./programs.html",
   "./exercises.html",
+  "./program-editor.html",
+  "./exercise-editor.html",
   "./hido-show.html",
   "./styles.css",
   "./app.js",
@@ -60,7 +60,7 @@ self.addEventListener("fetch", function (event) {
         return response;
       });
     }).catch(function () {
-      if (event.request.mode === "navigate") return caches.match("./index.html");
+      if (event.request.mode === "navigate") return caches.match("./programs.html");
       throw new Error("Network request failed");
     })
   );

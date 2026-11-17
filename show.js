@@ -4,6 +4,7 @@ const SHOW_STORAGE_KEY = "hido-show.program.v1";
 const showRoot = document.getElementById("show-app");
 let shownProgram = loadShownProgram();
 let showMessage = "";
+let showMessageKind = "success";
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, function (character) {
@@ -183,32 +184,87 @@ function render() {
   document.title = shownProgram ? shownProgram.program.name + " | hido-show" : "hido-show | نمایش برنامه";
   showRoot.innerHTML = '<section class="page show-page"><header class="page-heading"><p class="eyebrow">hido-show · نمایشگر برنامه</p>' +
     '<h1>برنامهٔ تمرینی</h1><p class="page-intro">فایل JSON که مربی از hido-co گرفته را انتخاب کن. برنامه در این صفحه فقط نمایش داده می‌شود.</p></header>' +
-    '<form class="show-import-form" data-form="load-program-json"><label class="field-label">فایل برنامهٔ مربی<input class="file-input" name="program-file" type="file" accept=".json,application/json" required></label>' +
-    '<button class="primary-button" type="submit">باز کردن برنامه</button>' +
-    (shownProgram ? '<button class="small-action" type="button" data-action="clear-program">بستن برنامه</button>' : "") + '</form>' +
-    (showMessage ? '<p class="show-feedback" role="status">' + escapeHtml(showMessage) + '</p>' : "") +
+    '<form class="show-import-form" data-form="load-program-json"><label class="file-dropzone" data-file-dropzone for="show-program-file">' +
+    '<input class="file-input" id="show-program-file" name="program-file" type="file" accept=".json,application/json" aria-label="انتخاب فایل JSON برنامه" required>' +
+    '<span class="file-picker-icon" aria-hidden="true">↑</span><span class="file-picker-copy"><strong>فایل برنامه را انتخاب کن</strong><small data-file-name>یا فایل JSON را اینجا رها کن</small></span>' +
+    '<span class="file-picker-action">انتخاب فایل</span></label><div class="file-picker-actions">' +
+    '<button class="primary-button" type="submit" disabled>نمایش برنامه</button>' +
+    (shownProgram ? '<button class="small-action" type="button" data-action="clear-program">بستن برنامه</button>' : "") + '</div></form>' +
+    (showMessage ? '<p class="show-feedback is-' + escapeHtml(showMessageKind) + '" role="status">' + escapeHtml(showMessage) + '</p>' : "") +
     renderProgram() + '</section>';
 }
 
-showRoot.addEventListener("submit", async function (event) {
-  const form = event.target.closest('[data-form="load-program-json"]');
-  if (!form) return;
-  event.preventDefault();
-  const file = form.elements.namedItem("program-file").files[0];
+function readFileText(file) {
+  if (typeof file.text === "function") return file.text();
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () { resolve(String(reader.result || "")); };
+    reader.onerror = function () { reject(new Error("خواندن فایل ناموفق بود.")); };
+    reader.readAsText(file, "UTF-8");
+  });
+}
+
+async function openProgramFile(file) {
   if (!file) return;
   try {
-    const payload = JSON.parse(await file.text());
+    const rawText = await readFileText(file);
+    const payload = JSON.parse(rawText.replace(/^\uFEFF/, ""));
     shownProgram = normalizeProgramFile(payload);
     showMessage = "برنامهٔ «" + shownProgram.program.name + "» باز شد.";
+    showMessageKind = "success";
     try {
       window.localStorage.setItem(SHOW_STORAGE_KEY, JSON.stringify(shownProgram));
     } catch (storageError) {
       showMessage += " این مرورگر نتوانست نسخهٔ آفلاین را ذخیره کند.";
+      showMessageKind = "warning";
     }
   } catch (error) {
     showMessage = error instanceof SyntaxError ? "محتوای فایل، JSON معتبر نیست." : error.message || "باز کردن فایل ناموفق بود.";
+    showMessageKind = "error";
   }
   render();
+}
+
+showRoot.addEventListener("change", function (event) {
+  const input = event.target.closest('[name="program-file"]');
+  if (!input) return;
+  const file = input.files && input.files[0];
+  const name = showRoot.querySelector("[data-file-name]");
+  const submit = showRoot.querySelector('[data-form="load-program-json"] [type="submit"]');
+  if (name) name.textContent = file ? file.name : "یا فایل JSON را اینجا رها کن";
+  if (submit) submit.disabled = !file;
+  const dropzone = input.closest("[data-file-dropzone]");
+  if (dropzone) dropzone.classList.toggle("has-file", Boolean(file));
+});
+
+showRoot.addEventListener("dragover", function (event) {
+  const dropzone = event.target.closest("[data-file-dropzone]");
+  if (!dropzone) return;
+  event.preventDefault();
+  dropzone.classList.add("is-dragging");
+});
+
+showRoot.addEventListener("dragleave", function (event) {
+  const dropzone = event.target.closest("[data-file-dropzone]");
+  if (dropzone && !dropzone.contains(event.relatedTarget)) dropzone.classList.remove("is-dragging");
+});
+
+showRoot.addEventListener("drop", function (event) {
+  const dropzone = event.target.closest("[data-file-dropzone]");
+  if (!dropzone) return;
+  event.preventDefault();
+  dropzone.classList.remove("is-dragging");
+  const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+  if (file) openProgramFile(file);
+});
+
+showRoot.addEventListener("submit", function (event) {
+  const form = event.target.closest('[data-form="load-program-json"]');
+  if (!form) return;
+  event.preventDefault();
+  const input = form.elements.namedItem("program-file");
+  const file = input && input.files && input.files[0];
+  if (file) openProgramFile(file);
 });
 
 showRoot.addEventListener("click", function (event) {
@@ -216,6 +272,7 @@ showRoot.addEventListener("click", function (event) {
   if (!button) return;
   shownProgram = null;
   showMessage = "برنامه از این دستگاه بسته شد.";
+  showMessageKind = "success";
   try { window.localStorage.removeItem(SHOW_STORAGE_KEY); } catch (error) {}
   render();
 });

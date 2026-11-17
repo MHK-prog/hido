@@ -3,32 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#17261e">
-  <meta name="description" content="ساخت و خروجی JSON برنامه‌های تمرینی برای مربیان در hido-co">
-  <title>نوشتن برنامه | hido-co</title>
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" href="./assets/icons/hido.svg" type="image/svg+xml">
-  <link rel="preload" href="./assets/fonts/Vazirmatn-VF.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="./styles.css">
+  <meta name="theme-color" content="#f4f5ef">
+  <meta name="description" content="ورود به hido-co یا hido-show">
+  <title>hido</title>
+  <style>
+    :root { color-scheme: light; font-family: Tahoma, Arial, sans-serif; background: #f4f5ef; color: #17261e; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; min-height: 100svh; display: grid; place-items: center; margin: 0; padding: 24px; }
+    main { width: min(100%, 440px); padding: 30px 24px; border: 1px solid #e5e8df; border-radius: 24px; background: #fff; box-shadow: 0 18px 50px #17261e14; text-align: center; }
+    h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -.8px; }
+    p { margin: 0 0 24px; color: #737d75; font-size: 16px; line-height: 1.8; }
+    .site-links { display: grid; gap: 12px; }
+    .site-button { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 72px; padding: 12px 18px; border: 1px solid #dfe5d8; border-radius: 16px; background: #f8faf5; color: inherit; text-align: right; text-decoration: none; transition: transform .15s ease, background .15s ease; -webkit-tap-highlight-color: transparent; }
+    .site-button:active { transform: scale(.96); }
+    .site-button strong { display: block; font-size: 18px; }
+    .site-button small { display: block; margin-top: 4px; color: #737d75; font-size: 13px; }
+    .site-button span:last-child { color: #54732e; font-size: 24px; }
+    .site-button.is-show { border-color: #edcfad; background: #fff8f0; }
+    .site-button.is-show span:last-child { color: #a45d20; }
+    @media (prefers-reduced-motion: reduce) { .site-button { transition: none; } }
+  </style>
 </head>
-<body data-page="program">
-  <div class="app-shell">
-    <header class="topbar">
-      <a class="brand" href="./programs.html" aria-label="خانهٔ hido-co"><span class="brand-mark">h</span><span>hido-co</span></a>
-      <div class="topbar-tools">
-        <nav class="page-nav" aria-label="صفحه‌های hido-co">
-          <a href="./programs.html">برنامه‌ها</a>
-          <a class="active" href="./index.html" aria-current="page">نوشتن برنامه</a>
-          <a href="./exercises.html">تعریف حرکت</a>
-        </nav>
-        <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="تغییر به حالت تیره" title="تغییر به حالت تیره">☾</button>
-      </div>
-    </header>
-    <main class="app-main" id="app" aria-live="polite">
-      <p class="loading-message">در حال بارگذاری…</p>
-    </main>
-    <footer class="app-footer"><span>اطلاعات برنامه و حرکت‌ها در همین مرورگر ذخیره می‌شود.</span><span id="offline-status" role="status">آماده‌سازی آفلاین…</span></footer>
-  </div>
-  <script src="./app.js" defer></script>
+<body>
+  <main>
+    <h1>hido</h1>
+    <p>یکی از دو سایت را انتخاب کن.</p>
+    <nav class="site-links" aria-label="انتخاب سایت">
+      <a class="site-button" href="https://mhk-prog.github.io/hido/programs.html"><span><strong>hido-co</strong><small>ساخت و مدیریت برنامه‌ها</small></span><span aria-hidden="true">←</span></a>
+      <a class="site-button is-show" href="https://mhk-prog.github.io/hido/hido-show.html"><span><strong>hido-show</strong><small>نمایش برنامهٔ ورزشکار</small></span><span aria-hidden="true">←</span></a>
+    </nav>
+  </main>
 </body>
 </html>
