@@ -1,6 +1,7 @@
 "use strict";
 
 const SHOW_STORAGE_KEY = "hido-show.program.v1";
+const PROGRAM_THEMES = ["#2f855a", "#2563eb", "#7c3aed", "#db2777", "#dc2626", "#ea580c", "#ca8a04", "#0891b2", "#475569", "#0f766e"];
 const showRoot = document.getElementById("show-app");
 let shownProgram = loadShownProgram();
 let showMessage = "";
@@ -45,21 +46,39 @@ function cleanWeight(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) / 100 : "";
 }
 
+function optionalDuration(value) {
+  if (value === "" || value === null || typeof value === "undefined") return "";
+  return toNumber(value, "", 1, 10800);
+}
+
+function safeTheme(value) {
+  const color = typeof value === "string" ? value.toLowerCase() : "";
+  return PROGRAM_THEMES.includes(color) ? color : PROGRAM_THEMES[0];
+}
+
+function durationLabel(value) {
+  return value === "" ? "مدت استراحت مشخص نشده" : number(value) + " ثانیه";
+}
+
 function normalizeProgramFile(payload) {
-  if (!payload || payload.format !== "hido-program" || payload.schemaVersion !== 1 || !payload.program) {
+  if (!payload || payload.format !== "hido-program" || ![1, 2].includes(payload.schemaVersion) || !payload.program) {
     throw new Error("این فایل JSON خروجی hido-co نیست یا نسخهٔ آن پشتیبانی نمی‌شود.");
   }
   if (!Array.isArray(payload.program.items)) throw new Error("فهرست حرکت‌های برنامه در فایل پیدا نشد.");
   const items = payload.program.items.map(function (item) {
     if (!item || typeof item !== "object") return null;
+    if (item.type === "rest") {
+      return { type: "rest", durationSeconds: optionalDuration(item.durationSeconds) };
+    }
     if (item.type === "superset") {
       const movements = Array.isArray(item.movements) ? item.movements.map(function (movement) {
         if (!movement || typeof movement !== "object") return null;
+        if (movement.type === "rest") return { type: "rest", durationSeconds: optionalDuration(movement.durationSeconds) };
         return {
+          type: "single",
           name: safeName(movement.name),
           reps: toNumber(movement.reps, 10, 1, 1000),
           weightKg: cleanWeight(movement.weightKg),
-          restAfterSeconds: toNumber(movement.restAfterSeconds, 0, 0, 3600),
           primaryMuscles: safeMuscles(movement.primaryMuscles),
           secondaryMuscles: safeMuscles(movement.secondaryMuscles)
         };
@@ -68,9 +87,6 @@ function normalizeProgramFile(payload) {
         type: "superset",
         name: safeName(item.name),
         rounds: toNumber(item.rounds, 3, 1, 50),
-        restBetweenRoundsSeconds: toNumber(item.restBetweenRoundsSeconds, 90, 0, 3600),
-        restMode: ["none", "equal", "individual"].includes(item.restMode) ? item.restMode : "none",
-        restBetweenMovementsSeconds: toNumber(item.restBetweenMovementsSeconds, 0, 0, 3600),
         movements: movements
       };
     }
@@ -82,17 +98,16 @@ function normalizeProgramFile(payload) {
       reps: toNumber(item.reps, 10, 1, 1000),
       durationSeconds: toNumber(item.durationSeconds, 30, 1, 10800),
       weightKg: cleanWeight(item.weightKg),
-      restBetweenSetsSeconds: toNumber(item.restBetweenSetsSeconds, 90, 0, 3600),
       primaryMuscles: safeMuscles(item.primaryMuscles),
       secondaryMuscles: safeMuscles(item.secondaryMuscles)
     };
   }).filter(Boolean);
   return {
     format: "hido-program",
-    schemaVersion: 1,
+    schemaVersion: 2,
     program: {
       name: safeName(payload.program.name),
-      restBetweenExercisesSeconds: toNumber(payload.program.restBetweenExercisesSeconds, 120, 0, 3600),
+      themeColor: safeTheme(payload.program.themeColor),
       items: items
     }
   };
@@ -119,48 +134,33 @@ function weightLabel(weight) {
   return weight === "" ? "بدون وزنهٔ افزوده" : number(weight) + " کیلوگرم";
 }
 
-function renderSingle(item, index, total, restBetweenExercisesSeconds) {
+function renderRest(item, index) {
+  return '<section class="program-block is-rest viewer-program-block"><article class="program-movement viewer-rest-block"><div class="program-movement-heading"><span class="pair-marker">استراحت</span><strong>استراحت</strong></div>' +
+    '<p class="viewer-rest-duration">' + escapeHtml(durationLabel(item.durationSeconds)) + '</p></article></section>';
+}
+
+function renderSingle(item) {
   const prescription = item.executionType === "reps"
     ? number(item.reps) + " تکرار در هر ست"
     : number(item.durationSeconds) + " ثانیه در هر ست";
-  const rest = index < total - 1
-    ? '<div class="block-footer"><span>استراحت تا حرکت بعدی</span><strong>' + number(restBetweenExercisesSeconds) + ' ثانیه</strong></div>'
-    : "";
   return '<section class="program-block is-single viewer-program-block"><article class="program-movement">' +
     '<div class="program-movement-heading"><span class="pair-marker">حرکت تکی</span><strong>' + escapeHtml(item.name) + '</strong></div>' +
-    '<div class="viewer-prescription"><span>' + number(item.sets) + ' ست</span><span>' + prescription + '</span><span>' + weightLabel(item.weightKg) + '</span>' +
-    '<span>استراحت بین ست‌ها: ' + number(item.restBetweenSetsSeconds) + ' ثانیه</span></div>' +
-    renderMuscles(item.primaryMuscles, item.secondaryMuscles) + '</article>' + rest + '</section>';
+    '<div class="viewer-prescription"><span>' + number(item.sets) + ' ست</span><span>' + prescription + '</span><span>' + weightLabel(item.weightKg) + '</span></div>' +
+    renderMuscles(item.primaryMuscles, item.secondaryMuscles) + '</article></section>';
 }
 
-function supersetRestLabel(item) {
-  if (item.restMode === "none") return "بدون استراحت بین حرکت‌ها";
-  if (item.restMode === "equal") return "استراحت برابر بین حرکت‌ها: " + number(item.restBetweenMovementsSeconds) + " ثانیه";
-  return "استراحت مجزا بین حرکت‌ها";
-}
-
-function renderSuperset(item, index, total, restBetweenExercisesSeconds) {
+function renderSuperset(item) {
   const movements = item.movements.map(function (movement, movementIndex) {
-    const gap = movementIndex < item.movements.length - 1
-      ? item.restMode === "equal"
-        ? '<p class="viewer-gap">استراحت: ' + number(item.restBetweenMovementsSeconds) + ' ثانیه</p>'
-        : item.restMode === "individual"
-          ? '<p class="viewer-gap">استراحت: ' + number(movement.restAfterSeconds) + ' ثانیه</p>'
-          : ""
-      : "";
+    if (movement.type === "rest") return '<li><div class="viewer-gap">استراحت · ' + escapeHtml(durationLabel(movement.durationSeconds)) + '</div></li>';
     return '<li><div class="viewer-superset-movement"><span class="viewer-step">' + number(movementIndex + 1) +
       '</span><div class="viewer-movement-copy"><strong>' + escapeHtml(movement.name) + '</strong>' +
-      renderMuscles(movement.primaryMuscles, movement.secondaryMuscles) + '</div><small>' + number(movement.reps) + ' تکرار · ' + escapeHtml(weightLabel(movement.weightKg)) + '</small></div>' + gap + '</li>';
+      renderMuscles(movement.primaryMuscles, movement.secondaryMuscles) + '</div><small>' + number(movement.reps) + ' تکرار · ' + escapeHtml(weightLabel(movement.weightKg)) + '</small></div></li>';
   }).join("");
-  const rest = index < total - 1
-    ? '<div class="block-footer"><span>استراحت تا حرکت بعدی</span><strong>' + number(restBetweenExercisesSeconds) + ' ثانیه</strong></div>'
-    : "";
   return '<section class="program-block is-superset viewer-program-block"><article class="program-movement compound-program-movement">' +
     '<div class="program-movement-heading"><span class="pair-marker">سوپرست</span><strong>' + escapeHtml(item.name) + '</strong></div>' +
-    '<div class="compound-summary"><strong>' + number(item.rounds) + ' ست · هر ست یک دور کامل</strong><span>' + escapeHtml(supersetRestLabel(item)) + '</span>' +
-    '<span>استراحت بین ست‌های سوپرست: ' + number(item.restBetweenRoundsSeconds) + ' ثانیه</span></div>' +
+    '<div class="compound-summary"><strong>' + number(item.rounds) + ' ست · هر ست یک دور کامل</strong></div>' +
     (movements ? '<ol class="viewer-superset-list">' + movements + '</ol>' : '<p class="field-help">حرکتی در این سوپرست نیست.</p>') +
-    '</article>' + rest + '</section>';
+    '</article></section>';
 }
 
 function renderProgram() {
@@ -169,13 +169,11 @@ function renderProgram() {
   }
   const items = shownProgram.program.items;
   const blocks = items.map(function (item, index) {
-    return item.type === "superset"
-      ? renderSuperset(item, index, items.length, shownProgram.program.restBetweenExercisesSeconds)
-      : renderSingle(item, index, items.length, shownProgram.program.restBetweenExercisesSeconds);
+    if (item.type === "rest") return renderRest(item, index);
+    return item.type === "superset" ? renderSuperset(item) : renderSingle(item);
   }).join("");
-  return '<section class="page show-program-page"><header class="page-heading"><p class="eyebrow">برنامهٔ مربی</p><h1>' +
-    escapeHtml(shownProgram.program.name) + '</h1><p class="page-intro">' + number(items.length) + ' حرکت · استراحت بین حرکت‌ها: ' +
-    number(shownProgram.program.restBetweenExercisesSeconds) + ' ثانیه</p></header>' +
+  return '<section class="page show-program-page" style="--program-theme:' + safeTheme(shownProgram.program.themeColor) + '"><header class="page-heading"><p class="eyebrow">برنامهٔ مربی</p><h1>' +
+    escapeHtml(shownProgram.program.name) + '</h1><p class="page-intro">' + number(items.length) + ' بخش برنامه</p></header>' +
     (items.length ? '<div class="program-block-list">' + blocks + '</div>' : '<div class="empty-state"><strong>این برنامه هنوز حرکتی ندارد</strong><p>از مربی نسخهٔ به‌روز برنامه را بگیر.</p></div>') +
     '<p class="show-attribution">فایل برنامه از hido-co دریافت شده است.</p></section>';
 }
